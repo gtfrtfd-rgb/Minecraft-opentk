@@ -26,7 +26,7 @@ public class World
                 int worldZ = cz * Chunk.SizeZ + z;
 
                 float n = noise.Noise(worldX * 0.05f, worldZ * 0.05f);
-                int height = (int)(n * 8 + 20); // базовая высота ~20
+                int height = (int)(n * 8 + 20);
 
                 for (int y = 0; y < Chunk.SizeY; y++)
                 {
@@ -36,7 +36,7 @@ public class World
                     else if (y <= height - 4) block = BlockType.Stone;
 
                     if (block != BlockType.Air)
-                        chunk.SetBlock(x, y, z, block);
+                        chunk.SetBlockDirect(x, y, z, block);
                 }
             }
 
@@ -47,9 +47,9 @@ public class World
     public BlockType GetBlock(int worldX, int worldY, int worldZ)
     {
         var chunkPos = new Vector3i(
-            Mathf.Floor(worldX / (float)Chunk.SizeX),
+            (int)MathF.Floor(worldX / (float)Chunk.SizeX),
             0,
-            Mathf.Floor(worldZ / (float)Chunk.SizeZ));
+            (int)MathF.Floor(worldZ / (float)Chunk.SizeZ));
 
         if (!_chunks.TryGetValue(chunkPos, out var chunk)) return BlockType.Air;
 
@@ -61,9 +61,9 @@ public class World
     public void SetBlock(int worldX, int worldY, int worldZ, BlockType type)
     {
         var chunkPos = new Vector3i(
-            Mathf.Floor(worldX / (float)Chunk.SizeX),
+            (int)MathF.Floor(worldX / (float)Chunk.SizeX),
             0,
-            Mathf.Floor(worldZ / (float)Chunk.SizeZ));
+            (int)MathF.Floor(worldZ / (float)Chunk.SizeZ));
 
         if (!_chunks.TryGetValue(chunkPos, out var chunk)) return;
 
@@ -74,7 +74,6 @@ public class World
 
     public IEnumerable<Chunk> GetVisibleChunks(Vector3 cameraPos)
     {
-        // Упрощённая видимость: все чанки в радиусе 32 блоков
         foreach (var chunk in _chunks.Values)
         {
             var center = new Vector3(

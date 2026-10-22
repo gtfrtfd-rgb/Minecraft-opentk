@@ -1,4 +1,4 @@
-using OpenTK.Graphics.OpenGL4;
+using System.Collections.Generic;
 using OpenTK.Mathematics;
 
 namespace MinecraftClone.World;
@@ -6,7 +6,7 @@ namespace MinecraftClone.World;
 public class Chunk
 {
     public const int SizeX = 16;
-    public const int SizeY = 64; // упрощённая высота, для прототипа достаточно
+    public const int SizeY = 64;
     public const int SizeZ = 16;
 
     public Vector3i Position { get; }
@@ -22,11 +22,19 @@ public class Chunk
         return _blocks[x, y, z];
     }
 
+    // Обычный SetBlock (с перестройкой меша)
     public void SetBlock(int x, int y, int z, BlockType type)
     {
         if (x < 0 || x >= SizeX || y < 0 || y >= SizeY || z < 0 || z >= SizeZ) return;
         _blocks[x, y, z] = type;
         RebuildMesh();
+    }
+
+    // Быстрый SetBlock без перестройки меша (используется при генерации мира)
+    public void SetBlockDirect(int x, int y, int z, BlockType type)
+    {
+        if (x < 0 || x >= SizeX || y < 0 || y >= SizeY || z < 0 || z >= SizeZ) return;
+        _blocks[x, y, z] = type;
     }
 
     public void RebuildMesh()
@@ -41,13 +49,12 @@ public class Chunk
             var block = _blocks[x, y, z];
             if (block == BlockType.Air) continue;
 
-            // Проверяем каждого соседа; грань добавляется, если сосед прозрачный
-            AddFaceIfVisible(vertices, indices, x, y, z, 0, 1, 0, block, 0); // top
-            AddFaceIfVisible(vertices, indices, x, y, z, 0, -1, 0, block, 1); // bottom
-            AddFaceIfVisible(vertices, indices, x, y, z, 0, 0, 1, block, 2); // front
-            AddFaceIfVisible(vertices, indices, x, y, z, 0, 0, -1, block, 3); // back
-            AddFaceIfVisible(vertices, indices, x, y, z, -1, 0, 0, block, 4); // left
-            AddFaceIfVisible(vertices, indices, x, y, z, 1, 0, 0, block, 5); // right
+            AddFaceIfVisible(vertices, indices, x, y, z, 0, 1, 0, block, 0);
+            AddFaceIfVisible(vertices, indices, x, y, z, 0, -1, 0, block, 1);
+            AddFaceIfVisible(vertices, indices, x, y, z, 0, 0, 1, block, 2);
+            AddFaceIfVisible(vertices, indices, x, y, z, 0, 0, -1, block, 3);
+            AddFaceIfVisible(vertices, indices, x, y, z, -1, 0, 0, block, 4);
+            AddFaceIfVisible(vertices, indices, x, y, z, 1, 0, 0, block, 5);
         }
 
         if (vertices.Count == 0)
@@ -66,7 +73,6 @@ public class Chunk
     {
         int nx = x + dx, ny = y + dy, nz = z + dz;
 
-        // Выход за пределы чанка считаем воздухом (на стыках чанков нужна отдельная логика)
         if (nx < 0 || nx >= SizeX || ny < 0 || ny >= SizeY || nz < 0 || nz >= SizeZ)
             return;
 
@@ -75,7 +81,6 @@ public class Chunk
         var uv = BlockData.GetUV(block, faceIndex);
         uint start = (uint)(verts.Count / 8);
 
-        // 6 вершин на грань (2 треугольника) с позицией, UV и нормалью
         AddVertex(verts, x, y, z, uv, faceIndex);
         AddVertex(verts, x + 1, y, z, uv, faceIndex);
         AddVertex(verts, x + 1, y, z + 1, uv, faceIndex);
@@ -89,9 +94,8 @@ public class Chunk
     private static void AddVertex(List<float> v, float x, float y, float z, Vector4 uv, int face)
     {
         v.Add(x); v.Add(y); v.Add(z);
-        v.Add(face == 0 ? uv.X : face == 1 ? uv.X : uv.X);
-        v.Add(face == 0 ? uv.Y : face == 1 ? uv.W : uv.Y);
-        // нормали упрощены; для прототипа можно передавать 0
+        v.Add(uv.X);
+        v.Add(face == 1 ? uv.W : uv.Y);
         v.Add(0); v.Add(0); v.Add(0);
     }
 

@@ -7,6 +7,5 @@ uniform sampler2D textureAtlas;
 
 void main()
 {
-    // NEAREST-фильтрация задаётся в TextureAtlas, но дублируем для чёткости пикселей
     FragColor = texture(textureAtlas, TexCoord);
 }
