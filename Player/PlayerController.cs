@@ -8,18 +8,75 @@ public class PlayerController
 {
     private readonly Camera _camera;
     private readonly World.World _world;
+    
+    public Vector3 Position { get; private set; }
+    public Vector3 Velocity;
+    public bool IsGrounded;
+    
+    private const float PlayerWidth = 0.6f;
+    private const float PlayerHeight = 1.8f;
+    private const float EyeHeight = 1.62f;
+    
+    private const float Gravity = -24f; 
+    private const float JumpForce = 8.5f;
+    private const float MoveSpeed = 5.5f;
+    
     private const float Reach = 5f;
 
-    public PlayerController(Camera camera, World.World world)
+    public PlayerController(Camera camera, World.World world, Vector3 startPosition)
     {
         _camera = camera;
         _world = world;
+        Position = startPosition;
+        
+        _camera.Position = Position + new Vector3(0, EyeHeight, 0);
     }
 
     public void Update(float dt, KeyboardState keyboard, MouseState mouse)
     {
-        // В прототипе движение камеры уже обрабатывается в Game.cs,
-        // здесь можно добавить гравитацию и коллизии с землёй.
+        Vector3 front = _camera.GetFrontVector();
+        front.Y = 0;
+        if (front.LengthSquared > 0) front.Normalize();
+        
+        Vector3 right = Vector3.Cross(front, Vector3.UnitY).Normalized();
+
+        Vector3 moveDir = Vector3.Zero;
+        if (keyboard.IsKeyDown(Keys.W)) moveDir += front;
+        if (keyboard.IsKeyDown(Keys.S)) moveDir -= front;
+        if (keyboard.IsKeyDown(Keys.A)) moveDir -= right;
+        if (keyboard.IsKeyDown(Keys.D)) moveDir += right;
+        
+        if (moveDir.LengthSquared > 0) moveDir.Normalize();
+
+        Velocity.X = moveDir.X * MoveSpeed;
+        Velocity.Z = moveDir.Z * MoveSpeed;
+
+        if (keyboard.IsKeyDown(Keys.Space) && IsGrounded)
+        {
+            Velocity.Y = JumpForce;
+            IsGrounded = false;
+        }
+
+        float remainingTime = dt;
+        IsGrounded = false; 
+        
+        while (remainingTime > 0f)
+        {
+            float step = Math.Min(remainingTime, 0.016f);
+            remainingTime -= step;
+
+            Velocity.Y += Gravity * step;
+            Velocity.Y = Math.Max(Velocity.Y, -40f);
+
+            Vector3 playerSize = new Vector3(PlayerWidth, PlayerHeight, PlayerWidth);
+            
+            // ВАЖНО: добавлено ref перед Velocity
+            Position = Physics.Collision.Move(_world, Position, playerSize, ref Velocity, step, out bool onGround);
+            
+            if (onGround) IsGrounded = true;
+        }
+
+        _camera.Position = Position + new Vector3(0, EyeHeight, 0);
     }
 
     public void BreakBlock()
@@ -46,7 +103,6 @@ public class PlayerController
         Vector3 origin = _camera.Position;
         Vector3 dir = _camera.GetFrontVector();
 
-        // DDA по воксельной сетке (упрощённая версия алгоритма Amanatides & Woo)
         var pos = new Vector3i(
             (int)MathF.Floor(origin.X),
             (int)MathF.Floor(origin.Y),

@@ -15,7 +15,7 @@ public class TextureAtlas
 
         GenerateGrassTop(pixels, width, 0, 15);
         GenerateDirt(pixels, width, 2, 15);
-        GenerateStone(pixels, width, 1, 15);
+        GenerateStone(pixels, width, 1, 15); // Улучшенный камень
         GenerateWoodTop(pixels, width, 4, 15);
         GenerateWoodSide(pixels, width, 5, 15);
         GenerateLeaves(pixels, width, 6, 15);
@@ -37,12 +37,42 @@ public class TextureAtlas
     private static void SetPixel(byte[] pixels, int atlasWidth, int tileX, int tileY, int px, int py, byte r, byte g, byte b, byte a = 255)
     {
         int x = tileX * 16 + px;
-        int y = tileY * 16 + (15 - py); // Инверсия Y для OpenGL
+        int y = tileY * 16 + (15 - py);
         int index = (y * atlasWidth + x) * 4;
         pixels[index] = r;
         pixels[index + 1] = g;
         pixels[index + 2] = b;
         pixels[index + 3] = a;
+    }
+
+    private static void GenerateStone(byte[] p, int w, int tx, int ty)
+    {
+        var rnd = new Random(300 + tx * 31 + ty);
+        
+        // Базовый цвет камня (серый)
+        byte baseColor = 128;
+        
+        for (int x = 0; x < 16; x++)
+        for (int y = 0; y < 16; y++)
+        {
+            // Немного случайного шума
+            int noise = rnd.Next(-10, 10);
+            byte v = (byte)Math.Clamp(baseColor + noise, 100, 150);
+            
+            // Добавляем темные вкрапления (шум Перлина/кластеры)
+            if (rnd.NextDouble() < 0.15)
+                v = (byte)(v - rnd.Next(15, 30));
+                
+            // Добавляем светлые вкрапления
+            if (rnd.NextDouble() < 0.1)
+                v = (byte)(v + rnd.Next(15, 25));
+
+            // Небольшие темные трещины
+            if ((x * 3 + y * 7) % 11 == 0)
+                v = (byte)(v - 20);
+
+            SetPixel(p, w, tx, ty, x, y, v, v, v);
+        }
     }
 
     private static void GenerateGrassTop(byte[] p, int w, int tx, int ty)
@@ -69,17 +99,6 @@ public class TextureAtlas
         {
             int px = rnd.Next(16), py = rnd.Next(16);
             SetPixel(p, w, tx, ty, px, py, 80, 60, 40);
-        }
-    }
-
-    private static void GenerateStone(byte[] p, int w, int tx, int ty)
-    {
-        var rnd = new Random(300 + tx * 31 + ty);
-        for (int x = 0; x < 16; x++)
-        for (int y = 0; y < 16; y++)
-        {
-            byte v = (byte)rnd.Next(120, 170);
-            SetPixel(p, w, tx, ty, x, y, v, v, v);
         }
     }
 

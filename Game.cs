@@ -34,12 +34,11 @@ public class Game : GameWindow
         _atlas = new Renderer.TextureAtlas(16, 16);
         _world = new World.World(_atlas);
 
-        _camera = new Player.Camera(new Vector3(16, 30, 16));
-        _controller = new Player.PlayerController(_camera, _world);
+        _camera = new Player.Camera(Vector3.Zero);
+        _controller = new Player.PlayerController(_camera, _world, new Vector3(16, 40, 16));
 
         CursorState = CursorState.Grabbed;
         _lastMousePos = new Vector2(MousePosition.X, MousePosition.Y);
-        Console.WriteLine("Загрузка ресурсов завершена. Мир будет сгенерирован при первом кадре.");
     }
 
     protected override void OnUpdateFrame(FrameEventArgs args)
@@ -49,24 +48,20 @@ public class Game : GameWindow
         if (KeyboardState.IsKeyDown(Keys.Escape))
             Close();
 
-        if (KeyboardState.IsKeyDown(Keys.W)) _camera.MoveForward((float)args.Time);
-        if (KeyboardState.IsKeyDown(Keys.S)) _camera.MoveForward(-(float)args.Time);
-        if (KeyboardState.IsKeyDown(Keys.A)) _camera.MoveRight(-(float)args.Time);
-        if (KeyboardState.IsKeyDown(Keys.D)) _camera.MoveRight((float)args.Time);
-        if (KeyboardState.IsKeyDown(Keys.Space)) _camera.MoveUp((float)args.Time);
-        if (KeyboardState.IsKeyDown(Keys.LeftShift)) _camera.MoveUp(-(float)args.Time);
-
         var mouse = new Vector2(MousePosition.X, MousePosition.Y);
         if (_firstMove) { _lastMousePos = mouse; _firstMove = false; }
         var delta = mouse - _lastMousePos;
         _lastMousePos = mouse;
+        
         _camera.Yaw += delta.X * 0.15f;
         _camera.Pitch -= delta.Y * 0.15f;
         _camera.Pitch = Math.Clamp(_camera.Pitch, -89f, 89f);
 
-        _controller.Update((float)args.Time, KeyboardState, MouseState);
+        // Ограничение времени кадра для защиты от лагов
+        float dt = Math.Min((float)args.Time, 0.05f);
+        
+        _controller.Update(dt, KeyboardState, MouseState);
 
-        // Используем IsButtonPressed, чтобы избежать многократного срабатывания за кадр
         if (MouseState.IsButtonPressed(MouseButton.Left))
             _controller.BreakBlock();
         if (MouseState.IsButtonPressed(MouseButton.Right))
@@ -77,13 +72,12 @@ public class Game : GameWindow
     {
         base.OnRenderFrame(args);
 
-        // Генерируем мир только один раз, при первом кадре
         if (!_isWorldGenerated)
         {
-            Console.WriteLine("Начинаем генерацию мира (это может занять время)...");
-            _world.Generate(4, 4); // Уменьшим размер для начала
+            Console.WriteLine("Генерация мира...");
+            _world.Generate(8, 8); 
             _isWorldGenerated = true;
-            Console.WriteLine("Генерация мира завершена!");
+            Console.WriteLine("Мир готов!");
         }
 
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
