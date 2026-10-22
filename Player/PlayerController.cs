@@ -13,6 +13,8 @@ public class PlayerController
     public Vector3 Velocity;
     public bool IsGrounded;
     
+    public BlockType SelectedBlock { get; set; } = BlockType.Stone;
+
     private const float PlayerWidth = 0.6f;
     private const float PlayerHeight = 1.8f;
     private const float EyeHeight = 1.62f;
@@ -20,7 +22,6 @@ public class PlayerController
     private const float Gravity = -24f; 
     private const float JumpForce = 8.5f;
     private const float MoveSpeed = 5.5f;
-    
     private const float Reach = 5f;
 
     public PlayerController(Camera camera, World.World world, Vector3 startPosition)
@@ -28,7 +29,6 @@ public class PlayerController
         _camera = camera;
         _world = world;
         Position = startPosition;
-        
         _camera.Position = Position + new Vector3(0, EyeHeight, 0);
     }
 
@@ -69,8 +69,6 @@ public class PlayerController
             Velocity.Y = Math.Max(Velocity.Y, -40f);
 
             Vector3 playerSize = new Vector3(PlayerWidth, PlayerHeight, PlayerWidth);
-            
-            // ВАЖНО: добавлено ref перед Velocity
             Position = Physics.Collision.Move(_world, Position, playerSize, ref Velocity, step, out bool onGround);
             
             if (onGround) IsGrounded = true;
@@ -91,7 +89,7 @@ public class PlayerController
         {
             var placePos = pos + normal;
             if (_world.GetBlock(placePos.X, placePos.Y, placePos.Z) == BlockType.Air)
-                _world.SetBlock(placePos.X, placePos.Y, placePos.Z, BlockType.Stone);
+                _world.SetBlock(placePos.X, placePos.Y, placePos.Z, SelectedBlock); // Ставим выбранный блок
         }
     }
 
@@ -108,23 +106,14 @@ public class PlayerController
             (int)MathF.Floor(origin.Y),
             (int)MathF.Floor(origin.Z));
 
-        var step = new Vector3i(
-            dir.X > 0 ? 1 : -1,
-            dir.Y > 0 ? 1 : -1,
-            dir.Z > 0 ? 1 : -1);
-
+        var step = new Vector3i(dir.X > 0 ? 1 : -1, dir.Y > 0 ? 1 : -1, dir.Z > 0 ? 1 : -1);
         var tMax = new Vector3(
             ((dir.X > 0 ? pos.X + 1 - origin.X : origin.X - pos.X) / MathF.Abs(dir.X)),
             ((dir.Y > 0 ? pos.Y + 1 - origin.Y : origin.Y - pos.Y) / MathF.Abs(dir.Y)),
             ((dir.Z > 0 ? pos.Z + 1 - origin.Z : origin.Z - pos.Z) / MathF.Abs(dir.Z)));
-
-        var tDelta = new Vector3(
-            1f / MathF.Abs(dir.X),
-            1f / MathF.Abs(dir.Y),
-            1f / MathF.Abs(dir.Z));
+        var tDelta = new Vector3(1f / MathF.Abs(dir.X), 1f / MathF.Abs(dir.Y), 1f / MathF.Abs(dir.Z));
 
         float t = 0f;
-
         while (t < Reach)
         {
             var block = _world.GetBlock(pos.X, pos.Y, pos.Z);
@@ -134,29 +123,10 @@ public class PlayerController
                 return true;
             }
 
-            if (tMax.X < tMax.Y && tMax.X < tMax.Z)
-            {
-                pos.X += step.X;
-                t = tMax.X;
-                tMax.X += tDelta.X;
-                normal = new Vector3i(-step.X, 0, 0);
-            }
-            else if (tMax.Y < tMax.Z)
-            {
-                pos.Y += step.Y;
-                t = tMax.Y;
-                tMax.Y += tDelta.Y;
-                normal = new Vector3i(0, -step.Y, 0);
-            }
-            else
-            {
-                pos.Z += step.Z;
-                t = tMax.Z;
-                tMax.Z += tDelta.Z;
-                normal = new Vector3i(0, 0, -step.Z);
-            }
+            if (tMax.X < tMax.Y && tMax.X < tMax.Z) { pos.X += step.X; t = tMax.X; tMax.X += tDelta.X; normal = new Vector3i(-step.X, 0, 0); }
+            else if (tMax.Y < tMax.Z) { pos.Y += step.Y; t = tMax.Y; tMax.Y += tDelta.Y; normal = new Vector3i(0, -step.Y, 0); }
+            else { pos.Z += step.Z; t = tMax.Z; tMax.Z += tDelta.Z; normal = new Vector3i(0, 0, -step.Z); }
         }
-
         return false;
     }
 }
