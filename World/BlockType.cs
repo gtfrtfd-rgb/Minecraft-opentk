@@ -16,20 +16,18 @@ public enum BlockType : byte
 
 public static class BlockData
 {
-    // Возвращает UV-прямоугольник для грани: (u0, v0, u1, v1) в нормализованных координатах атласа
     public static Vector4 GetUV(BlockType type, int face)
     {
-        // face: 0=top, 1=bottom, 2=front, 3=back, 4=left, 5=right
         return type switch
         {
-            BlockType.Grass when face == 0 => AtlasTile(0, 15), // верх травы
-            BlockType.Grass when face == 1 => AtlasTile(2, 15), // низ — земля
-            BlockType.Grass => AtlasTile(3, 15),                // бока — земля с травой
+            BlockType.Grass when face == 0 => AtlasTile(0, 15),
+            BlockType.Grass when face == 1 => AtlasTile(2, 15),
+            BlockType.Grass => AtlasTile(3, 15),
 
             BlockType.Dirt => AtlasTile(2, 15),
             BlockType.Stone => AtlasTile(1, 15),
-            BlockType.Wood when face <= 1 => AtlasTile(4, 15),   // спил дерева
-            BlockType.Wood => AtlasTile(5, 15),                  // кора
+            BlockType.Wood when face <= 1 => AtlasTile(4, 15),
+            BlockType.Wood => AtlasTile(5, 15),
             BlockType.Leaves => AtlasTile(6, 15),
             BlockType.Sand => AtlasTile(7, 15),
             BlockType.Water => AtlasTile(8, 15),
@@ -42,8 +40,8 @@ public static class BlockData
     {
         const int atlasSize = 16;
         float u0 = (float)tileX / atlasSize;
-        float v0 = (float)tileY / atlasSize;
         float u1 = (float)(tileX + 1) / atlasSize;
+        float v0 = (float)tileY / atlasSize;
         float v1 = (float)(tileY + 1) / atlasSize;
         return new Vector4(u0, v0, u1, v1);
     }

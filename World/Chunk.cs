@@ -22,7 +22,6 @@ public class Chunk
         return _blocks[x, y, z];
     }
 
-    // Обычный SetBlock (с перестройкой меша)
     public void SetBlock(int x, int y, int z, BlockType type)
     {
         if (x < 0 || x >= SizeX || y < 0 || y >= SizeY || z < 0 || z >= SizeZ) return;
@@ -30,7 +29,6 @@ public class Chunk
         RebuildMesh();
     }
 
-    // Быстрый SetBlock без перестройки меша (используется при генерации мира)
     public void SetBlockDirect(int x, int y, int z, BlockType type)
     {
         if (x < 0 || x >= SizeX || y < 0 || y >= SizeY || z < 0 || z >= SizeZ) return;
@@ -73,30 +71,81 @@ public class Chunk
     {
         int nx = x + dx, ny = y + dy, nz = z + dz;
 
-        if (nx < 0 || nx >= SizeX || ny < 0 || ny >= SizeY || nz < 0 || nz >= SizeZ)
-            return;
-
-        if (BlockData.IsSolid(_blocks[nx, ny, nz])) return;
+        if (nx >= 0 && nx < SizeX && ny >= 0 && ny < SizeY && nz >= 0 && nz < SizeZ)
+        {
+            if (BlockData.IsSolid(_blocks[nx, ny, nz])) return;
+        }
 
         var uv = BlockData.GetUV(block, faceIndex);
-        uint start = (uint)(verts.Count / 8);
+        
+        float wx = Position.X * SizeX + x;
+        float wy = y;
+        float wz = Position.Z * SizeZ + z;
 
-        AddVertex(verts, x, y, z, uv, faceIndex);
-        AddVertex(verts, x + 1, y, z, uv, faceIndex);
-        AddVertex(verts, x + 1, y, z + 1, uv, faceIndex);
-        AddVertex(verts, x, y, z, uv, faceIndex);
-        AddVertex(verts, x + 1, y, z + 1, uv, faceIndex);
-        AddVertex(verts, x, y, z + 1, uv, faceIndex);
+        float X = wx, Y = wy, Z = wz;
+        float u0 = uv.X, v0 = uv.Y, u1 = uv.Z, v1 = uv.W;
 
-        inds.AddRange(new uint[] { start, start + 1, start + 2, start + 3, start + 4, start + 5 });
+        switch (faceIndex)
+        {
+            case 0: // Верх (+Y)
+                AddQuad(verts, inds,
+                    new Vector3(X, Y + 1, Z), new Vector3(X, Y + 1, Z + 1), new Vector3(X + 1, Y + 1, Z + 1), new Vector3(X + 1, Y + 1, Z),
+                    new Vector2(u0, v1), new Vector2(u0, v0), new Vector2(u1, v0), new Vector2(u1, v1),
+                    new Vector3(0, 1, 0));
+                break;
+            case 1: // Низ (-Y)
+                AddQuad(verts, inds,
+                    new Vector3(X, Y, Z + 1), new Vector3(X, Y, Z), new Vector3(X + 1, Y, Z), new Vector3(X + 1, Y, Z + 1),
+                    new Vector2(u0, v1), new Vector2(u0, v0), new Vector2(u1, v0), new Vector2(u1, v1),
+                    new Vector3(0, -1, 0));
+                break;
+            case 2: // Перед (+Z)
+                AddQuad(verts, inds,
+                    new Vector3(X, Y, Z + 1), new Vector3(X + 1, Y, Z + 1), new Vector3(X + 1, Y + 1, Z + 1), new Vector3(X, Y + 1, Z + 1),
+                    new Vector2(u0, v0), new Vector2(u1, v0), new Vector2(u1, v1), new Vector2(u0, v1),
+                    new Vector3(0, 0, 1));
+                break;
+            case 3: // Зад (-Z)
+                AddQuad(verts, inds,
+                    new Vector3(X + 1, Y, Z), new Vector3(X, Y, Z), new Vector3(X, Y + 1, Z), new Vector3(X + 1, Y + 1, Z),
+                    new Vector2(u0, v0), new Vector2(u1, v0), new Vector2(u1, v1), new Vector2(u0, v1),
+                    new Vector3(0, 0, -1));
+                break;
+            case 4: // Лево (-X)
+                AddQuad(verts, inds,
+                    new Vector3(X, Y, Z), new Vector3(X, Y, Z + 1), new Vector3(X, Y + 1, Z + 1), new Vector3(X, Y + 1, Z),
+                    new Vector2(u0, v0), new Vector2(u1, v0), new Vector2(u1, v1), new Vector2(u0, v1),
+                    new Vector3(-1, 0, 0));
+                break;
+            case 5: // Право (+X)
+                AddQuad(verts, inds,
+                    new Vector3(X + 1, Y, Z + 1), new Vector3(X + 1, Y, Z), new Vector3(X + 1, Y + 1, Z), new Vector3(X + 1, Y + 1, Z + 1),
+                    new Vector2(u0, v0), new Vector2(u1, v0), new Vector2(u1, v1), new Vector2(u0, v1),
+                    new Vector3(1, 0, 0));
+                break;
+        }
     }
 
-    private static void AddVertex(List<float> v, float x, float y, float z, Vector4 uv, int face)
+    private void AddQuad(List<float> verts, List<uint> inds,
+        Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3,
+        Vector2 uv0, Vector2 uv1, Vector2 uv2, Vector2 uv3,
+        Vector3 normal)
     {
-        v.Add(x); v.Add(y); v.Add(z);
-        v.Add(uv.X);
-        v.Add(face == 1 ? uv.W : uv.Y);
-        v.Add(0); v.Add(0); v.Add(0);
+        uint start = (uint)(verts.Count / 8);
+
+        AddVertex(verts, p0, uv0, normal);
+        AddVertex(verts, p1, uv1, normal);
+        AddVertex(verts, p2, uv2, normal);
+        AddVertex(verts, p3, uv3, normal);
+
+        inds.AddRange(new uint[] { start, start + 1, start + 2, start, start + 2, start + 3 });
+    }
+
+    private static void AddVertex(List<float> v, Vector3 pos, Vector2 uv, Vector3 normal)
+    {
+        v.Add(pos.X); v.Add(pos.Y); v.Add(pos.Z);
+        v.Add(uv.X); v.Add(uv.Y);
+        v.Add(normal.X); v.Add(normal.Y); v.Add(normal.Z);
     }
 
     public void Dispose() => Mesh?.Dispose();

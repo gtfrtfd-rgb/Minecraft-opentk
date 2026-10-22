@@ -11,9 +11,8 @@ public class TextureAtlas
         const int tileSize = 16;
         int width = tilesX * tileSize;
         int height = tilesY * tileSize;
-        var pixels = new byte[width * height * 4]; // RGBA
+        var pixels = new byte[width * height * 4];
 
-        // Генерируем базовые тайлы
         GenerateGrassTop(pixels, width, 0, 15);
         GenerateDirt(pixels, width, 2, 15);
         GenerateStone(pixels, width, 1, 15);
@@ -22,7 +21,7 @@ public class TextureAtlas
         GenerateLeaves(pixels, width, 6, 15);
         GenerateSand(pixels, width, 7, 15);
         GenerateWater(pixels, width, 8, 15);
-        GenerateGrassSide(pixels, width, 3, 15); // бок травы: земля + зелёная полоса сверху
+        GenerateGrassSide(pixels, width, 3, 15);
 
         Handle = GL.GenTexture();
         GL.BindTexture(TextureTarget.Texture2D, Handle);
@@ -38,7 +37,7 @@ public class TextureAtlas
     private static void SetPixel(byte[] pixels, int atlasWidth, int tileX, int tileY, int px, int py, byte r, byte g, byte b, byte a = 255)
     {
         int x = tileX * 16 + px;
-        int y = tileY * 16 + py;
+        int y = tileY * 16 + (15 - py); // Инверсия Y для OpenGL
         int index = (y * atlasWidth + x) * 4;
         pixels[index] = r;
         pixels[index + 1] = g;
@@ -66,7 +65,6 @@ public class TextureAtlas
             byte v = (byte)rnd.Next(100, 150);
             SetPixel(p, w, tx, ty, x, y, v, (byte)(v * 0.75f), (byte)(v * 0.5f));
         }
-        // Тёмные крапинки
         for (int i = 0; i < 12; i++)
         {
             int px = rnd.Next(16), py = rnd.Next(16);
@@ -144,7 +142,6 @@ public class TextureAtlas
 
     private static void GenerateGrassSide(byte[] p, int w, int tx, int ty)
     {
-        // Верхние 3–4 пикселя зелёные, остальное — земля
         GenerateDirt(p, w, tx, ty);
         var rnd = new Random(800 + tx * 31 + ty);
         for (int x = 0; x < 16; x++)

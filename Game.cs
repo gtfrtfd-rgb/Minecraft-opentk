@@ -30,7 +30,7 @@ public class Game : GameWindow
         GL.Enable(EnableCap.CullFace);
         GL.CullFace(CullFaceMode.Back);
 
-        _shader = new Renderer.Shader("Shaders/vertex.glsl", "Shaders/fragment.glsl");
+        _shader = new Renderer.Shader();
         _atlas = new Renderer.TextureAtlas(16, 16);
         _world = new World.World(_atlas);
 

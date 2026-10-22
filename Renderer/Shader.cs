@@ -1,3 +1,4 @@
+using System;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 
@@ -7,27 +8,57 @@ public class Shader
 {
     public int Handle { get; }
 
-    public Shader(string vertexPath, string fragmentPath)
+    public Shader()
     {
-        // Читаем файлы целиком
-        string vertexSource = File.ReadAllText(vertexPath);
-        string fragmentSource = File.ReadAllText(fragmentPath);
+        // Текст вершинного шейдера
+        string vertexSource = @"
+#version 330 core
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec2 aTexCoord;
+layout(location = 2) in vec3 aNormal;
+uniform mat4 view;
+uniform mat4 projection;
+out vec2 TexCoord;
+out vec3 Normal;
+void main()
+{
+    TexCoord = aTexCoord;
+    Normal = aNormal;
+    gl_Position = projection * view * vec4(aPosition, 1.0);
+}
+";
 
-        // Проверка на пустой файл (частая причина ошибки EOF)
-        if (string.IsNullOrWhiteSpace(fragmentSource))
-        {
-            throw new Exception($"Файл фрагментного шейдера '{fragmentPath}' пуст или не может быть прочитан.");
-        }
+        // Текст фрагментного шейдера
+        string fragmentSource = @"
+#version 330 core
+in vec2 TexCoord;
+in vec3 Normal;
+out vec4 FragColor;
+uniform sampler2D textureAtlas;
+void main()
+{
+    vec4 texColor = texture(textureAtlas, TexCoord);
+    if (texColor.a < 0.1) discard;
+    float light = 1.0;
+    if (Normal.y > 0.5) light = 1.0;
+    else if (Normal.y < -0.5) light = 0.5;
+    else if (Normal.z > 0.5) light = 0.8;
+    else if (Normal.z < -0.5) light = 0.7;
+    else if (Normal.x > 0.5) light = 0.6;
+    else if (Normal.x < -0.5) light = 0.6;
+    FragColor = vec4(texColor.rgb * light, texColor.a);
+}
+";
 
         int vertexShader = GL.CreateShader(ShaderType.VertexShader);
         GL.ShaderSource(vertexShader, vertexSource);
         GL.CompileShader(vertexShader);
-        CheckCompile(vertexShader, "VERTEX", vertexPath);
+        CheckCompile(vertexShader, "VERTEX");
 
         int fragmentShader = GL.CreateShader(ShaderType.FragmentShader);
         GL.ShaderSource(fragmentShader, fragmentSource);
         GL.CompileShader(fragmentShader);
-        CheckCompile(fragmentShader, "FRAGMENT", fragmentPath);
+        CheckCompile(fragmentShader, "FRAGMENT");
 
         Handle = GL.CreateProgram();
         GL.AttachShader(Handle, vertexShader);
@@ -50,13 +81,13 @@ public class Shader
     public void SetInt(string name, int value)
         => GL.Uniform1(GL.GetUniformLocation(Handle, name), value);
 
-    private static void CheckCompile(int shader, string type, string path)
+    private static void CheckCompile(int shader, string type)
     {
         GL.GetShader(shader, ShaderParameter.CompileStatus, out int status);
         if (status == 0)
         {
             string infoLog = GL.GetShaderInfoLog(shader);
-            throw new Exception($"Ошибка компиляции {type} шейдера ('{path}'): {infoLog}");
+            throw new Exception($"Ошибка компиляции {type} шейдера: {infoLog}");
         }
     }
 
