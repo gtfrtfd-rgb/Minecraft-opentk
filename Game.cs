@@ -51,7 +51,6 @@ public class Game : GameWindow
 
         if (KeyboardState.IsKeyDown(Keys.Escape)) Close();
 
-        // Выбор блоков (1-7)
         if (KeyboardState.IsKeyPressed(Keys.D1)) _controller.SelectedBlock = BlockType.Grass;
         if (KeyboardState.IsKeyPressed(Keys.D2)) _controller.SelectedBlock = BlockType.Dirt;
         if (KeyboardState.IsKeyPressed(Keys.D3)) _controller.SelectedBlock = BlockType.Stone;
@@ -113,49 +112,48 @@ public class Game : GameWindow
         float cy = screenH / 2f;
 
         // --- ПРИЦЕЛ ---
-        // Черная обводка (чтобы было видно на светлом/синем фоне)
-        _ui.DrawQuad(cx - 11, cy - 2, 22, 4, Vector4.Zero, new Vector4(0, 0, 0, 0.8f), screenW, screenH);
-        _ui.DrawQuad(cx - 2, cy - 11, 4, 22, Vector4.Zero, new Vector4(0, 0, 0, 0.8f), screenW, screenH);
+        // Черная обводка
+        _ui.DrawSolidQuad(cx - 11, cy - 2, 22, 4, new Vector4(0, 0, 0, 0.8f), screenW, screenH);
+        _ui.DrawSolidQuad(cx - 2, cy - 11, 4, 22, new Vector4(0, 0, 0, 0.8f), screenW, screenH);
         // Белый центр
-        _ui.DrawQuad(cx - 10, cy - 1, 20, 2, Vector4.Zero, new Vector4(1, 1, 1, 1f), screenW, screenH);
-        _ui.DrawQuad(cx - 1, cy - 10, 2, 20, Vector4.Zero, new Vector4(1, 1, 1, 1f), screenW, screenH);
+        _ui.DrawSolidQuad(cx - 10, cy - 1, 20, 2, new Vector4(1, 1, 1, 1f), screenW, screenH);
+        _ui.DrawSolidQuad(cx - 1, cy - 10, 2, 20, new Vector4(1, 1, 1, 1f), screenW, screenH);
 
         // --- ХОТБАР ---
-        float slotSize = 56f; // Размер слота
-        float padding = 4f;   // Расстояние между слотами
+        float slotSize = 56f;
+        float padding = 4f;
         float totalWidth = 9 * slotSize + 8 * padding;
         float startX = cx - totalWidth / 2f;
-        float startY = screenH - slotSize - 20f; // Отступ снизу
+        float startY = screenH - slotSize - 20f;
 
-        // Общий темный фон за всем хотбаром
-        _ui.DrawQuad(startX - 6, startY - 6, totalWidth + 12, slotSize + 12, Vector4.Zero, new Vector4(0.1f, 0.1f, 0.1f, 0.6f), screenW, screenH);
+        // Общий темный фон
+        _ui.DrawSolidQuad(startX - 6, startY - 6, totalWidth + 12, slotSize + 12, new Vector4(0.1f, 0.1f, 0.1f, 0.6f), screenW, screenH);
 
         for (int i = 0; i < 9; i++)
         {
             float sx = startX + i * (slotSize + padding);
             bool isSelected = (i + 1) == (int)_controller.SelectedBlock;
 
-            // 1. Отрисовка фона слота
+            // Фон слота
             if (isSelected)
             {
-                // ВЫДЕЛЕННЫЙ СЛОТ: рисуем яркую белую рамку вокруг
-                _ui.DrawQuad(sx - 4, startY - 4, slotSize + 8, slotSize + 8, Vector4.Zero, new Vector4(0.9f, 0.9f, 0.9f, 1f), screenW, screenH);
-                // Внутри рамки - темно-серый фон
-                _ui.DrawQuad(sx, startY, slotSize, slotSize, Vector4.Zero, new Vector4(0.3f, 0.3f, 0.3f, 0.9f), screenW, screenH);
+                // Белая рамка
+                _ui.DrawSolidQuad(sx - 4, startY - 4, slotSize + 8, slotSize + 8, new Vector4(0.9f, 0.9f, 0.9f, 1f), screenW, screenH);
+                // Внутренний темный фон
+                _ui.DrawSolidQuad(sx, startY, slotSize, slotSize, new Vector4(0.3f, 0.3f, 0.3f, 0.9f), screenW, screenH);
             }
             else
             {
-                // ОБЫЧНЫЙ СЛОТ: полупрозрачный серый
-                _ui.DrawQuad(sx, startY, slotSize, slotSize, Vector4.Zero, new Vector4(0.4f, 0.4f, 0.4f, 0.6f), screenW, screenH);
+                // Обычный слот
+                _ui.DrawSolidQuad(sx, startY, slotSize, slotSize, new Vector4(0.4f, 0.4f, 0.4f, 0.6f), screenW, screenH);
             }
 
-            // 2. Отрисовка самого блока внутри слота
+            // Сам блок (с текстурой)
             if (i + 1 <= (int)BlockType.Water)
             {
                 BlockType blockToDraw = (BlockType)(i + 1);
-                var uv = BlockData.GetUV(blockToDraw, 0); // 0 - верхняя грань
+                var uv = BlockData.GetUV(blockToDraw, 0);
 
-                // Если слот выбран, предмет внутри становится чуть больше
                 float itemSize = isSelected ? slotSize - 8 : slotSize - 16;
                 float itemOffset = (slotSize - itemSize) / 2f;
                 

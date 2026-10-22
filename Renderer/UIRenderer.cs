@@ -29,8 +29,13 @@ in vec2 TexCoord;
 out vec4 FragColor;
 uniform sampler2D texture0;
 uniform vec4 colorMultiplier;
+uniform bool useTexture;
 void main() {
-    FragColor = texture(texture0, TexCoord) * colorMultiplier;
+    if (useTexture) {
+        FragColor = texture(texture0, TexCoord) * colorMultiplier;
+    } else {
+        FragColor = colorMultiplier;
+    }
 }";
 
         int vs = GL.CreateShader(ShaderType.VertexShader);
@@ -64,15 +69,24 @@ void main() {
         GL.BindVertexArray(0);
     }
 
+    // Отрисовка текстуры (для блоков в хотбаре)
     public void DrawQuad(float x, float y, float width, float height, Vector4 uvRect, Vector4 color, int screenWidth, int screenHeight)
     {
-        // Генерируем 6 вершин (2 треугольника) вместо индексов
+        RenderQuad(x, y, width, height, uvRect, color, screenWidth, screenHeight, true);
+    }
+
+    // Отрисовка сплошного цвета (для рамок и прицела)
+    public void DrawSolidQuad(float x, float y, float width, float height, Vector4 color, int screenWidth, int screenHeight)
+    {
+        RenderQuad(x, y, width, height, Vector4.Zero, color, screenWidth, screenHeight, false);
+    }
+
+    private void RenderQuad(float x, float y, float width, float height, Vector4 uvRect, Vector4 color, int screenWidth, int screenHeight, bool useTexture)
+    {
         float[] vertices = {
-            // Треугольник 1
             x, y, uvRect.X, uvRect.W,
             x, y + height, uvRect.X, uvRect.Y,
             x + width, y + height, uvRect.Z, uvRect.Y,
-            // Треугольник 2
             x, y, uvRect.X, uvRect.W,
             x + width, y + height, uvRect.Z, uvRect.Y,
             x + width, y, uvRect.Z, uvRect.W
@@ -84,14 +98,13 @@ void main() {
 
         GL.UseProgram(_shader);
         
-        // Динамическая ортографическая проекция под размер окна
         var proj = Matrix4.CreateOrthographicOffCenter(0, screenWidth, screenHeight, 0, -1, 1); 
         GL.UniformMatrix4(GL.GetUniformLocation(_shader, "projection"), false, ref proj);
         
         GL.Uniform4(GL.GetUniformLocation(_shader, "colorMultiplier"), color);
         GL.Uniform1(GL.GetUniformLocation(_shader, "texture0"), 0);
+        GL.Uniform1(GL.GetUniformLocation(_shader, "useTexture"), useTexture ? 1 : 0);
 
-        // Отрисовка без индексов
         GL.DrawArrays(PrimitiveType.Triangles, 0, 6);
         GL.BindVertexArray(0);
     }
