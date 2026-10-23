@@ -41,10 +41,12 @@ public class PlayerController
         Vector3 right = Vector3.Cross(front, Vector3.UnitY).Normalized();
 
         Vector3 moveDir = Vector3.Zero;
-        if (keyboard.IsKeyDown(Keys.W)) moveDir += front;
-        if (keyboard.IsKeyDown(Keys.S)) moveDir -= front;
-        if (keyboard.IsKeyDown(Keys.A)) moveDir -= right;
-        if (keyboard.IsKeyDown(Keys.D)) moveDir += right;
+
+        // УПРАВЛЕНИЕ: WASD + Стрелочки
+        if (keyboard.IsKeyDown(Keys.W) || keyboard.IsKeyDown(Keys.Up))    moveDir += front;
+        if (keyboard.IsKeyDown(Keys.S) || keyboard.IsKeyDown(Keys.Down))  moveDir -= front;
+        if (keyboard.IsKeyDown(Keys.A) || keyboard.IsKeyDown(Keys.Left))  moveDir -= right;
+        if (keyboard.IsKeyDown(Keys.D) || keyboard.IsKeyDown(Keys.Right)) moveDir += right;
         
         if (moveDir.LengthSquared > 0) moveDir.Normalize();
 
@@ -89,7 +91,23 @@ public class PlayerController
         {
             var placePos = pos + normal;
             if (_world.GetBlock(placePos.X, placePos.Y, placePos.Z) == BlockType.Air)
-                _world.SetBlock(placePos.X, placePos.Y, placePos.Z, SelectedBlock); // Ставим выбранный блок
+            {
+                // Проверка: не ставим блок в себя
+                Vector3 blockMin = new Vector3(placePos.X, placePos.Y, placePos.Z);
+                Vector3 blockMax = new Vector3(placePos.X + 1, placePos.Y + 1, placePos.Z + 1);
+
+                Vector3 playerMin = new Vector3(Position.X - PlayerWidth / 2f, Position.Y, Position.Z - PlayerWidth / 2f);
+                Vector3 playerMax = new Vector3(Position.X + PlayerWidth / 2f, Position.Y + PlayerHeight, Position.Z + PlayerWidth / 2f);
+
+                bool intersects = (playerMin.X < blockMax.X && playerMax.X > blockMin.X) &&
+                                  (playerMin.Y < blockMax.Y && playerMax.Y > blockMin.Y) &&
+                                  (playerMin.Z < blockMax.Z && playerMax.Z > blockMin.Z);
+
+                if (!intersects)
+                {
+                    _world.SetBlock(placePos.X, placePos.Y, placePos.Z, SelectedBlock);
+                }
+            }
         }
     }
 

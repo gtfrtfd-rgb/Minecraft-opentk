@@ -73,7 +73,8 @@ public class Chunk
 
         if (nx >= 0 && nx < SizeX && ny >= 0 && ny < SizeY && nz >= 0 && nz < SizeZ)
         {
-            if (BlockData.IsSolid(_blocks[nx, ny, nz])) return;
+            // ИСПОЛЬЗУЕМ IsOpaque: если сосед сплошной, грань не рисуем
+            if (BlockData.IsOpaque(_blocks[nx, ny, nz])) return;
         }
 
         var uv = BlockData.GetUV(block, faceIndex);

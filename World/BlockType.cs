@@ -46,5 +46,9 @@ public static class BlockData
         return new Vector4(u0, v0, u1, v1);
     }
 
+    // Физика: сталкивается ли игрок с блоком (Вода - нет, Листва - да)
     public static bool IsSolid(BlockType type) => type != BlockType.Air && type != BlockType.Water;
+    
+    // Графика: перекрывает ли блок грани соседей (Листва и Вода - прозрачные)
+    public static bool IsOpaque(BlockType type) => type != BlockType.Air && type != BlockType.Water && type != BlockType.Leaves;
 }
