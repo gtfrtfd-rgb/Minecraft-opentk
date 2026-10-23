@@ -14,13 +14,13 @@ public class Game : GameWindow
     private Renderer.Shader _shader = null!;
     private Renderer.TextureAtlas _atlas = null!;
     private Renderer.UIRenderer _ui = null!;
+    private Renderer.OutlineRenderer _outline = null!;
     private Player.Camera _camera = null!;
     private Player.PlayerController _controller = null!;
     private Vector2 _lastMousePos;
     private bool _firstMove = true;
     private bool _isWorldGenerated = false;
 
-    // --- ПЕРЕМЕННЫЕ ДЛЯ СЧЕТЧИКА FPS ---
     private readonly Stopwatch _fpsTimer = Stopwatch.StartNew();
     private int _frameCount = 0;
     private int _currentFps = 0;
@@ -32,7 +32,6 @@ public class Game : GameWindow
         base.OnLoad();
         MakeCurrent();
 
-        // ВКЛЮЧАЕМ V-SYNC
         VSync = VSyncMode.On;
 
         GL.ClearColor(0.5f, 0.7f, 1.0f, 1.0f);
@@ -45,6 +44,7 @@ public class Game : GameWindow
         _shader = new Renderer.Shader();
         _atlas = new Renderer.TextureAtlas(16, 16);
         _ui = new Renderer.UIRenderer();
+        _outline = new Renderer.OutlineRenderer();
         _world = new World.World(_atlas);
 
         _camera = new Player.Camera(Vector3.Zero);
@@ -88,7 +88,6 @@ public class Game : GameWindow
     {
         base.OnRenderFrame(args);
 
-        // --- ОБНОВЛЕНИЕ СЧЕТЧИКА FPS ---
         _frameCount++;
         if (_fpsTimer.ElapsedMilliseconds >= 1000)
         {
@@ -115,11 +114,20 @@ public class Game : GameWindow
 
         var visibleChunks = _world.GetVisibleChunks(_camera.Position).ToList();
 
-        // Проход 1: Непрозрачные
+        // Проход 1: Непрозрачные блоки
         GL.DepthMask(true);
         foreach (var chunk in visibleChunks) chunk.OpaqueMesh?.Draw(_shader);
 
-        // Проход 2: Прозрачные
+        // --- ОТРИСОВКА ОБВОДКИ БЛОКА (ПЕРЕНЕСЕНО СЮДА) ---
+        // Рисуем до прозрачных блоков, чтобы листва перекрывала задние ребра обводки
+        if (_controller.Raycast(out var targetPos, out _))
+        {
+            _outline.Draw(new Vector3(targetPos.X, targetPos.Y, targetPos.Z), 
+                          _camera.GetViewMatrix(), 
+                          _camera.GetProjectionMatrix((float)Size.X / Size.Y));
+        }
+
+        // Проход 2: Прозрачные блоки (Листва, Вода)
         GL.DepthMask(false); 
         foreach (var chunk in visibleChunks) chunk.TransparentMesh?.Draw(_shader);
         GL.DepthMask(true);
@@ -139,7 +147,7 @@ public class Game : GameWindow
         _ui.DrawSolidQuad(cx - 10, cy - 1, 20, 2, new Vector4(1, 1, 1, 1f), screenW, screenH);
         _ui.DrawSolidQuad(cx - 1, cy - 10, 2, 20, new Vector4(1, 1, 1, 1f), screenW, screenH);
 
-        // --- СЧЕТЧИК FPS (ИСПОЛЬЗУЕМ _currentFps) ---
+        // FPS
         DrawFPS(_currentFps, 20, 20, 4f, screenW, screenH);
 
         // Хотбар
@@ -180,7 +188,6 @@ public class Game : GameWindow
         SwapBuffers();
     }
 
-    // --- СИСТЕМА ОТРИСОВКИ ЦИФР (МИНИ-ШРИФТ 3x5) ---
     private void DrawFPS(int fps, float x, float y, float scale, int sw, int sh)
     {
         string text = $"FPS: {fps}";
@@ -230,16 +237,16 @@ public class Game : GameWindow
     private static readonly int[] S = { 0b011, 0b100, 0b010, 0b001, 0b110 };
     private static readonly int[] Colon = { 0b000, 0b010, 0b000, 0b010, 0b000 };
     private static readonly int[][] Digits = {
-        new int[] { 0b111, 0b101, 0b101, 0b101, 0b111 }, // 0
-        new int[] { 0b010, 0b110, 0b010, 0b010, 0b111 }, // 1
-        new int[] { 0b111, 0b001, 0b111, 0b100, 0b111 }, // 2
-        new int[] { 0b111, 0b001, 0b111, 0b001, 0b111 }, // 3
-        new int[] { 0b101, 0b101, 0b111, 0b001, 0b001 }, // 4
-        new int[] { 0b111, 0b100, 0b111, 0b001, 0b111 }, // 5
-        new int[] { 0b111, 0b100, 0b111, 0b101, 0b111 }, // 6
-        new int[] { 0b111, 0b001, 0b001, 0b001, 0b001 }, // 7
-        new int[] { 0b111, 0b101, 0b111, 0b101, 0b111 }, // 8
-        new int[] { 0b111, 0b101, 0b111, 0b001, 0b111 }  // 9
+        new int[] { 0b111, 0b101, 0b101, 0b101, 0b111 },
+        new int[] { 0b010, 0b110, 0b010, 0b010, 0b111 },
+        new int[] { 0b111, 0b001, 0b111, 0b100, 0b111 },
+        new int[] { 0b111, 0b001, 0b111, 0b001, 0b111 },
+        new int[] { 0b101, 0b101, 0b111, 0b001, 0b001 },
+        new int[] { 0b111, 0b100, 0b111, 0b001, 0b111 },
+        new int[] { 0b111, 0b100, 0b111, 0b101, 0b111 },
+        new int[] { 0b111, 0b001, 0b001, 0b001, 0b001 },
+        new int[] { 0b111, 0b101, 0b111, 0b101, 0b111 },
+        new int[] { 0b111, 0b101, 0b111, 0b001, 0b111 }
     };
 
     protected override void OnResize(ResizeEventArgs e)

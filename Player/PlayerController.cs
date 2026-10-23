@@ -41,8 +41,6 @@ public class PlayerController
         Vector3 right = Vector3.Cross(front, Vector3.UnitY).Normalized();
 
         Vector3 moveDir = Vector3.Zero;
-
-        // УПРАВЛЕНИЕ: WASD + Стрелочки
         if (keyboard.IsKeyDown(Keys.W) || keyboard.IsKeyDown(Keys.Up))    moveDir += front;
         if (keyboard.IsKeyDown(Keys.S) || keyboard.IsKeyDown(Keys.Down))  moveDir -= front;
         if (keyboard.IsKeyDown(Keys.A) || keyboard.IsKeyDown(Keys.Left))  moveDir -= right;
@@ -92,7 +90,6 @@ public class PlayerController
             var placePos = pos + normal;
             if (_world.GetBlock(placePos.X, placePos.Y, placePos.Z) == BlockType.Air)
             {
-                // Проверка: не ставим блок в себя
                 Vector3 blockMin = new Vector3(placePos.X, placePos.Y, placePos.Z);
                 Vector3 blockMax = new Vector3(placePos.X + 1, placePos.Y + 1, placePos.Z + 1);
 
@@ -111,7 +108,8 @@ public class PlayerController
         }
     }
 
-    private bool Raycast(out Vector3i blockPos, out Vector3i normal)
+    // ИЗМЕНЕНО НА PUBLIC
+    public bool Raycast(out Vector3i blockPos, out Vector3i normal)
     {
         blockPos = Vector3i.Zero;
         normal = Vector3i.Zero;
