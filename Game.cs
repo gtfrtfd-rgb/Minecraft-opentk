@@ -111,7 +111,6 @@ public class Game : GameWindow
         var frustum = new Frustum(view * proj);
         var visibleChunks = _world.GetVisibleChunks(_camera.Position, frustum).ToList();
 
-        // Проход 1: Непрозрачные
         GL.DepthMask(true);
         foreach (var chunk in visibleChunks) chunk.OpaqueMesh?.Draw(_shader);
 
@@ -120,12 +119,10 @@ public class Game : GameWindow
             _outline.Draw(new Vector3(targetPos.X, targetPos.Y, targetPos.Z), view, proj);
         }
 
-        // Проход 2: Прозрачные
         GL.DepthMask(false); 
         foreach (var chunk in visibleChunks) chunk.TransparentMesh?.Draw(_shader);
         GL.DepthMask(true);
 
-        // UI
         GL.Disable(EnableCap.DepthTest);
         _atlas.Bind(TextureUnit.Texture0);
 
@@ -167,7 +164,10 @@ public class Game : GameWindow
             if (i + 1 <= (int)BlockType.Water)
             {
                 BlockType blockToDraw = (BlockType)(i + 1);
-                var uv = BlockData.GetUV(blockToDraw, 0);
+                
+                Vector2 tileCoords = BlockData.GetTileCoords(blockToDraw, 0);
+                var uv = new Vector4(tileCoords.X / 16f, tileCoords.Y / 16f, (tileCoords.X + 1) / 16f, (tileCoords.Y + 1) / 16f);
+
                 float itemSize = isSelected ? slotSize - 8 : slotSize - 16;
                 float itemOffset = (slotSize - itemSize) / 2f;
                 _ui.DrawQuad(sx + itemOffset, startY + itemOffset, itemSize, itemSize, uv, Vector4.One, screenW, screenH);

@@ -16,40 +16,33 @@ public enum BlockType : byte
 
 public static class BlockData
 {
-    public static Vector4 GetUV(BlockType type, int face)
+    // d = ось (0-X, 1-Y, 2-Z), face = направление (0-положительное, 1-отрицательное)
+    public static Vector2 GetTileCoords(BlockType type, int d, int face)
     {
-        return type switch
+        float tileX = type switch
         {
-            BlockType.Grass when face == 0 => AtlasTile(0, 15),
-            BlockType.Grass when face == 1 => AtlasTile(2, 15),
-            BlockType.Grass => AtlasTile(3, 15),
-            BlockType.Dirt => AtlasTile(2, 15),
-            BlockType.Stone => AtlasTile(1, 15),
-            BlockType.Wood when face <= 1 => AtlasTile(4, 15),
-            BlockType.Wood => AtlasTile(5, 15),
-            BlockType.Leaves => AtlasTile(6, 15),
-            BlockType.Sand => AtlasTile(7, 15),
-            BlockType.Water => AtlasTile(8, 15),
-            _ => AtlasTile(0, 15)
+            // Верх (Y+, face=0) и низ (Y-, face=1) для травы
+            BlockType.Grass when d == 1 && face == 0 => 0, 
+            BlockType.Grass when d == 1 && face == 1 => 2, 
+            BlockType.Grass => 3, // Бока травы
+
+            BlockType.Dirt => 2,
+            BlockType.Stone => 1,
+            
+            // Верх и низ дерева (спил), бока - кора
+            BlockType.Wood when d == 1 => 4, 
+            BlockType.Wood => 5,             
+            
+            BlockType.Leaves => 6,
+            BlockType.Sand => 7,
+            BlockType.Water => 8,
+            _ => 0
         };
+        float tileY = 15; // Все наши текстуры в 15-й строке
+        return new Vector2(tileX, tileY);
     }
 
-    private static Vector4 AtlasTile(int tileX, int tileY)
-    {
-        const int atlasSize = 16;
-        float u0 = (float)tileX / atlasSize;
-        float u1 = (float)(tileX + 1) / atlasSize;
-        float v0 = (float)tileY / atlasSize;
-        float v1 = (float)(tileY + 1) / atlasSize;
-        return new Vector4(u0, v0, u1, v1);
-    }
-
-    // Является ли блок прозрачным (для разделения рендера)
     public static bool IsTransparent(BlockType type) => type == BlockType.Water || type == BlockType.Leaves;
-
-    // Физика: сталкивается ли игрок
     public static bool IsSolid(BlockType type) => type != BlockType.Air && type != BlockType.Water;
-    
-    // Графика: скрывает ли блок грани соседей (Вода и Листва - не скрывают)
     public static bool IsOpaque(BlockType type) => type != BlockType.Air && !IsTransparent(type);
 }

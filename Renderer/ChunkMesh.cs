@@ -1,9 +1,8 @@
-using System;
 using OpenTK.Graphics.OpenGL4;
 
 namespace MinecraftClone.Renderer;
 
-public class ChunkMesh : IDisposable
+public class ChunkMesh : System.IDisposable
 {
     private readonly int _vao;
     private readonly int _vbo;
@@ -25,7 +24,8 @@ public class ChunkMesh : IDisposable
         GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
         GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * sizeof(uint), indices, BufferUsageHint.StaticDraw);
 
-        int stride = 8 * sizeof(float);
+        // Теперь 10 float'ов на вершину (3 pos + 2 uv + 3 normal + 2 tile)
+        int stride = 10 * sizeof(float);
 
         GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, 0);
         GL.EnableVertexAttribArray(0);
@@ -35,6 +35,9 @@ public class ChunkMesh : IDisposable
 
         GL.VertexAttribPointer(2, 3, VertexAttribPointerType.Float, false, stride, 5 * sizeof(float));
         GL.EnableVertexAttribArray(2);
+
+        GL.VertexAttribPointer(3, 2, VertexAttribPointerType.Float, false, stride, 8 * sizeof(float));
+        GL.EnableVertexAttribArray(3);
 
         GL.BindVertexArray(0);
     }
