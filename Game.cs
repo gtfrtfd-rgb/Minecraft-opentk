@@ -48,8 +48,6 @@ public class Game : GameWindow
         _world = new World.World(_atlas);
 
         _camera = new Player.Camera(Vector3.Zero);
-        
-        // Спавним игрока ВЫСОКО В НЕБЕ (Y=80), чтобы он упал на землю и не застрял в дереве
         _controller = new Player.PlayerController(_camera, _world, new Vector3(0, 80, 0));
 
         CursorState = CursorState.Grabbed;
@@ -81,7 +79,6 @@ public class Game : GameWindow
 
         float dt = Math.Min((float)args.Time, 0.05f);
         _controller.Update(dt, KeyboardState, MouseState);
-
         _world.UpdateChunks(_controller.Position);
 
         if (MouseState.IsButtonPressed(MouseButton.Left)) _controller.BreakBlock();
@@ -114,6 +111,7 @@ public class Game : GameWindow
         var frustum = new Frustum(view * proj);
         var visibleChunks = _world.GetVisibleChunks(_camera.Position, frustum).ToList();
 
+        // Проход 1: Непрозрачные
         GL.DepthMask(true);
         foreach (var chunk in visibleChunks) chunk.OpaqueMesh?.Draw(_shader);
 
@@ -122,10 +120,12 @@ public class Game : GameWindow
             _outline.Draw(new Vector3(targetPos.X, targetPos.Y, targetPos.Z), view, proj);
         }
 
+        // Проход 2: Прозрачные
         GL.DepthMask(false); 
         foreach (var chunk in visibleChunks) chunk.TransparentMesh?.Draw(_shader);
         GL.DepthMask(true);
 
+        // UI
         GL.Disable(EnableCap.DepthTest);
         _atlas.Bind(TextureUnit.Texture0);
 

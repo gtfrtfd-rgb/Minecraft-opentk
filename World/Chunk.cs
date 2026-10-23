@@ -14,16 +14,8 @@ public class Chunk
     
     public Renderer.ChunkMesh? OpaqueMesh { get; private set; }
     public Renderer.ChunkMesh? TransparentMesh { get; private set; }
-    
     public bool IsDirty { get; private set; } = true; 
-    
-    // Оптимизация: запоминаем максимальную высоту, чтобы не перебирать пустоту
     private int _maxHeight = 0;
-    
-    private float[] _opaqueVerts = System.Array.Empty<float>();
-    private uint[] _opaqueInds = System.Array.Empty<uint>();
-    private float[] _transVerts = System.Array.Empty<float>();
-    private uint[] _transInds = System.Array.Empty<uint>();
 
     public Chunk(Vector2i position) => Position = position;
 
@@ -47,7 +39,7 @@ public class Chunk
     {
         if (x < 0 || x >= SizeX || y < 0 || y >= SizeY || z < 0 || z >= SizeZ) return;
         _blocks[x, y, z] = type;
-        if (type != BlockType.Air && y > _maxHeight) _maxHeight = y; // Обновляем высоту
+        if (type != BlockType.Air && y > _maxHeight) _maxHeight = y;
     }
 
     public void RebuildMeshData(World world)
@@ -58,9 +50,9 @@ public class Chunk
         var transVerts = new List<float>();
         var transInds = new List<uint>();
 
-        // Итерируемся только до максимальной высоты, а не до 128!
+        // Итерируемся только до максимальной высоты
         for (int x = 0; x < SizeX; x++)
-        for (int y = 0; y <= _maxHeight + 1; y++) // +1 на всякий случай
+        for (int y = 0; y <= _maxHeight + 1; y++) 
         for (int z = 0; z < SizeZ; z++)
         {
             var block = _blocks[x, y, z];
@@ -78,11 +70,17 @@ public class Chunk
             AddFaceIfVisible(world, vList, iList, x, y, z, 1, 0, 0, block, 5);
         }
 
+        // Сохраняем во временные массивы
         _opaqueVerts = opaqueVerts.ToArray();
         _opaqueInds = opaqueInds.ToArray();
         _transVerts = transVerts.ToArray();
         _transInds = transInds.ToArray();
     }
+
+    private float[] _opaqueVerts = System.Array.Empty<float>();
+    private uint[] _opaqueInds = System.Array.Empty<uint>();
+    private float[] _transVerts = System.Array.Empty<float>();
+    private uint[] _transInds = System.Array.Empty<uint>();
 
     public void UploadMesh()
     {

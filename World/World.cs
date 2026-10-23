@@ -1,12 +1,12 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Threading.Tasks;
+using System.Threading;
 using OpenTK.Mathematics;
 using MinecraftClone.Utils;
 
 namespace MinecraftClone.World;
 
-public class World
+public class World : System.IDisposable
 {
     private readonly ConcurrentDictionary<Vector2i, Chunk> _chunks = new();
     private readonly Renderer.TextureAtlas _atlas;
@@ -16,13 +16,17 @@ public class World
     private readonly ConcurrentQueue<Chunk> _chunksToUpload = new();
     private readonly HashSet<Vector2i> _pendingChunks = new();
     
-    // Флаг, чтобы не запускать 100 задач одновременно
-    private bool _isGenerating = false; 
+    private readonly Thread _generationThread;
+    private volatile bool _isRunning = true;
 
     public World(Renderer.TextureAtlas atlas)
     {
         _atlas = atlas;
         _noise = new SimplexNoise(1337);
+
+        _generationThread = new Thread(GenerationLoop);
+        _generationThread.IsBackground = true;
+        _generationThread.Start();
     }
 
     public BlockType GetBlock(int worldX, int worldY, int worldZ)
@@ -56,7 +60,7 @@ public class World
         if (localZ == Chunk.SizeZ - 1) _chunks.GetValueOrDefault(chunkPos + new Vector2i(0, 1))?.SetDirty();
     }
 
-    public void UpdateChunks(Vector3 playerPos, int renderDistance = 4) // УМЕНЬШИЛИ РАДИУС С 6 ДО 4
+    public void UpdateChunks(Vector3 playerPos, int renderDistance = 5)
     {
         Vector2i currentChunk = new Vector2i(
             (int)MathF.Floor(playerPos.X / Chunk.SizeX),
@@ -73,13 +77,6 @@ public class World
                     _chunksToGenerate.Enqueue(pos);
                 }
             }
-        }
-
-        // Запускаем генерацию только если она еще не запущена
-        if (!_chunksToGenerate.IsEmpty && !_isGenerating)
-        {
-            _isGenerating = true;
-            Task.Run(() => BackgroundGenerate());
         }
 
         int uploaded = 0;
@@ -119,19 +116,23 @@ public class World
         }
     }
 
-    private void BackgroundGenerate()
+    private void GenerationLoop()
     {
-        while (!_chunksToGenerate.IsEmpty)
+        while (_isRunning)
         {
-            if (!_chunksToGenerate.TryDequeue(out var pos)) break;
-
-            Chunk chunk = new Chunk(pos);
-            GenerateChunkData(chunk);
-            chunk.RebuildMeshData(this);
-            _chunksToUpload.Enqueue(chunk);
-            _pendingChunks.Remove(pos);
+            if (_chunksToGenerate.TryDequeue(out var pos))
+            {
+                Chunk chunk = new Chunk(pos);
+                GenerateChunkData(chunk);
+                chunk.RebuildMeshData(this);
+                _chunksToUpload.Enqueue(chunk);
+                _pendingChunks.Remove(pos);
+            }
+            else
+            {
+                Thread.Sleep(10); 
+            }
         }
-        _isGenerating = false; // Освобождаем флаг, когда очередь пуста
     }
 
     private void GenerateChunkData(Chunk chunk)
@@ -148,7 +149,7 @@ public class World
             float n = _noise.FractalNoise(worldX * 0.01f, worldZ * 0.01f, 3, 0.5f, 2.0f);
             int height = (int)(n * 8 + 35); 
 
-            for (int y = 0; y <= height; y++) // Итерируемся только до высоты!
+            for (int y = 0; y <= height; y++) 
             {
                 BlockType block = BlockType.Air;
                 float caveNoise = _noise.Noise3D(worldX * 0.05f, y * 0.05f, worldZ * 0.05f);
@@ -206,7 +207,7 @@ public class World
         foreach (var chunk in _chunks.Values)
         {
             var center = new Vector3(chunk.Position.X * Chunk.SizeX + Chunk.SizeX / 2f, 0, chunk.Position.Y * Chunk.SizeZ + Chunk.SizeZ / 2f);
-            if ((center - cameraPos).Length > 80f) continue; // Дистанция видимости чуть меньше
+            if ((center - cameraPos).Length > 80f) continue;
 
             var min = new Vector3(chunk.Position.X * Chunk.SizeX, 0, chunk.Position.Y * Chunk.SizeZ);
             var max = new Vector3(min.X + Chunk.SizeX, Chunk.SizeY, min.Z + Chunk.SizeZ);
@@ -216,5 +217,10 @@ public class World
                 yield return chunk;
             }
         }
+    }
+
+    public void Dispose()
+    {
+        _isRunning = false;
     }
 }
