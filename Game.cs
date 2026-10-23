@@ -89,20 +89,31 @@ public class Game : GameWindow
 
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
-        // 1. Рендер 3D мира
         _shader.Use();
         _shader.SetMatrix4("view", _camera.GetViewMatrix());
         _shader.SetMatrix4("projection", _camera.GetProjectionMatrix((float)Size.X / Size.Y));
         _shader.SetInt("textureAtlas", 0);
-
         _atlas.Bind(TextureUnit.Texture0);
 
-        foreach (var chunk in _world.GetVisibleChunks(_camera.Position))
+        var visibleChunks = _world.GetVisibleChunks(_camera.Position).ToList();
+
+        // --- ПРОХОД 1: Отрисовка НЕПРОЗРАЧНЫХ блоков (Камень, земля) ---
+        GL.DepthMask(true);
+        foreach (var chunk in visibleChunks)
         {
-            chunk.Mesh?.Draw(_shader);
+            chunk.OpaqueMesh?.Draw(_shader);
         }
 
-        // 2. Рендер UI
+        // --- ПРОХОД 2: Отрисовка ПРОЗРАЧНЫХ блоков (Вода, листва) ---
+        // Отключаем запись в буфер глубины, чтобы вода не перекрывала саму себя
+        GL.DepthMask(false); 
+        foreach (var chunk in visibleChunks)
+        {
+            chunk.TransparentMesh?.Draw(_shader);
+        }
+        GL.DepthMask(true); // Возвращаем обратно
+
+        // 3. Рендер UI
         GL.Disable(EnableCap.DepthTest);
         _atlas.Bind(TextureUnit.Texture0);
 
@@ -111,22 +122,19 @@ public class Game : GameWindow
         float cx = screenW / 2f;
         float cy = screenH / 2f;
 
-        // --- ПРИЦЕЛ ---
-        // Черная обводка
+        // Прицел
         _ui.DrawSolidQuad(cx - 11, cy - 2, 22, 4, new Vector4(0, 0, 0, 0.8f), screenW, screenH);
         _ui.DrawSolidQuad(cx - 2, cy - 11, 4, 22, new Vector4(0, 0, 0, 0.8f), screenW, screenH);
-        // Белый центр
         _ui.DrawSolidQuad(cx - 10, cy - 1, 20, 2, new Vector4(1, 1, 1, 1f), screenW, screenH);
         _ui.DrawSolidQuad(cx - 1, cy - 10, 2, 20, new Vector4(1, 1, 1, 1f), screenW, screenH);
 
-        // --- ХОТБАР ---
+        // Хотбар
         float slotSize = 56f;
         float padding = 4f;
         float totalWidth = 9 * slotSize + 8 * padding;
         float startX = cx - totalWidth / 2f;
         float startY = screenH - slotSize - 20f;
 
-        // Общий темный фон
         _ui.DrawSolidQuad(startX - 6, startY - 6, totalWidth + 12, slotSize + 12, new Vector4(0.1f, 0.1f, 0.1f, 0.6f), screenW, screenH);
 
         for (int i = 0; i < 9; i++)
@@ -134,29 +142,22 @@ public class Game : GameWindow
             float sx = startX + i * (slotSize + padding);
             bool isSelected = (i + 1) == (int)_controller.SelectedBlock;
 
-            // Фон слота
             if (isSelected)
             {
-                // Белая рамка
                 _ui.DrawSolidQuad(sx - 4, startY - 4, slotSize + 8, slotSize + 8, new Vector4(0.9f, 0.9f, 0.9f, 1f), screenW, screenH);
-                // Внутренний темный фон
                 _ui.DrawSolidQuad(sx, startY, slotSize, slotSize, new Vector4(0.3f, 0.3f, 0.3f, 0.9f), screenW, screenH);
             }
             else
             {
-                // Обычный слот
                 _ui.DrawSolidQuad(sx, startY, slotSize, slotSize, new Vector4(0.4f, 0.4f, 0.4f, 0.6f), screenW, screenH);
             }
 
-            // Сам блок (с текстурой)
             if (i + 1 <= (int)BlockType.Water)
             {
                 BlockType blockToDraw = (BlockType)(i + 1);
                 var uv = BlockData.GetUV(blockToDraw, 0);
-
                 float itemSize = isSelected ? slotSize - 8 : slotSize - 16;
                 float itemOffset = (slotSize - itemSize) / 2f;
-                
                 _ui.DrawQuad(sx + itemOffset, startY + itemOffset, itemSize, itemSize, uv, Vector4.One, screenW, screenH);
             }
         }

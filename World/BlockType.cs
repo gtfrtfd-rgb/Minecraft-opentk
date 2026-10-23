@@ -23,7 +23,6 @@ public static class BlockData
             BlockType.Grass when face == 0 => AtlasTile(0, 15),
             BlockType.Grass when face == 1 => AtlasTile(2, 15),
             BlockType.Grass => AtlasTile(3, 15),
-
             BlockType.Dirt => AtlasTile(2, 15),
             BlockType.Stone => AtlasTile(1, 15),
             BlockType.Wood when face <= 1 => AtlasTile(4, 15),
@@ -31,7 +30,6 @@ public static class BlockData
             BlockType.Leaves => AtlasTile(6, 15),
             BlockType.Sand => AtlasTile(7, 15),
             BlockType.Water => AtlasTile(8, 15),
-
             _ => AtlasTile(0, 15)
         };
     }
@@ -46,9 +44,12 @@ public static class BlockData
         return new Vector4(u0, v0, u1, v1);
     }
 
-    // Физика: сталкивается ли игрок с блоком (Вода - нет, Листва - да)
+    // Является ли блок прозрачным (для разделения рендера)
+    public static bool IsTransparent(BlockType type) => type == BlockType.Water || type == BlockType.Leaves;
+
+    // Физика: сталкивается ли игрок
     public static bool IsSolid(BlockType type) => type != BlockType.Air && type != BlockType.Water;
     
-    // Графика: перекрывает ли блок грани соседей (Листва и Вода - прозрачные)
-    public static bool IsOpaque(BlockType type) => type != BlockType.Air && type != BlockType.Water && type != BlockType.Leaves;
+    // Графика: скрывает ли блок грани соседей (Вода и Листва - не скрывают)
+    public static bool IsOpaque(BlockType type) => type != BlockType.Air && !IsTransparent(type);
 }
