@@ -5,6 +5,7 @@ using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using MinecraftClone.World;
+using MinecraftClone.Utils;
 
 namespace MinecraftClone;
 
@@ -106,33 +107,37 @@ public class Game : GameWindow
 
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
+        var view = _camera.GetViewMatrix();
+        var proj = _camera.GetProjectionMatrix((float)Size.X / Size.Y);
+
         _shader.Use();
-        _shader.SetMatrix4("view", _camera.GetViewMatrix());
-        _shader.SetMatrix4("projection", _camera.GetProjectionMatrix((float)Size.X / Size.Y));
+        _shader.SetMatrix4("view", view);
+        _shader.SetMatrix4("projection", proj);
         _shader.SetInt("textureAtlas", 0);
         _atlas.Bind(TextureUnit.Texture0);
 
-        var visibleChunks = _world.GetVisibleChunks(_camera.Position).ToList();
+        // СОЗДАЕМ FRUSTUM
+        var frustum = new Frustum(view * proj);
 
-        // Проход 1: Непрозрачные блоки
+        // ПЕРЕДАЕМ В WORLD
+        var visibleChunks = _world.GetVisibleChunks(_camera.Position, frustum).ToList();
+
+        // Проход 1: Непрозрачные
         GL.DepthMask(true);
         foreach (var chunk in visibleChunks) chunk.OpaqueMesh?.Draw(_shader);
 
-        // --- ОТРИСОВКА ОБВОДКИ БЛОКА (ПЕРЕНЕСЕНО СЮДА) ---
-        // Рисуем до прозрачных блоков, чтобы листва перекрывала задние ребра обводки
+        // Обводка
         if (_controller.Raycast(out var targetPos, out _))
         {
-            _outline.Draw(new Vector3(targetPos.X, targetPos.Y, targetPos.Z), 
-                          _camera.GetViewMatrix(), 
-                          _camera.GetProjectionMatrix((float)Size.X / Size.Y));
+            _outline.Draw(new Vector3(targetPos.X, targetPos.Y, targetPos.Z), view, proj);
         }
 
-        // Проход 2: Прозрачные блоки (Листва, Вода)
+        // Проход 2: Прозрачные
         GL.DepthMask(false); 
         foreach (var chunk in visibleChunks) chunk.TransparentMesh?.Draw(_shader);
         GL.DepthMask(true);
 
-        // 3. Рендер UI
+        // UI...
         GL.Disable(EnableCap.DepthTest);
         _atlas.Bind(TextureUnit.Texture0);
 
@@ -141,16 +146,13 @@ public class Game : GameWindow
         float cx = screenW / 2f;
         float cy = screenH / 2f;
 
-        // Прицел
         _ui.DrawSolidQuad(cx - 11, cy - 2, 22, 4, new Vector4(0, 0, 0, 0.8f), screenW, screenH);
         _ui.DrawSolidQuad(cx - 2, cy - 11, 4, 22, new Vector4(0, 0, 0, 0.8f), screenW, screenH);
         _ui.DrawSolidQuad(cx - 10, cy - 1, 20, 2, new Vector4(1, 1, 1, 1f), screenW, screenH);
         _ui.DrawSolidQuad(cx - 1, cy - 10, 2, 20, new Vector4(1, 1, 1, 1f), screenW, screenH);
 
-        // FPS
         DrawFPS(_currentFps, 20, 20, 4f, screenW, screenH);
 
-        // Хотбар
         float slotSize = 56f;
         float padding = 4f;
         float totalWidth = 9 * slotSize + 8 * padding;

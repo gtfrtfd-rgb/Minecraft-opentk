@@ -1,4 +1,5 @@
 using OpenTK.Mathematics;
+using MinecraftClone.Utils;
 
 namespace MinecraftClone.World;
 
@@ -11,7 +12,7 @@ public class World
 
     public void Generate(int chunksX, int chunksZ)
     {
-        var noise = new Utils.SimplexNoise(1337);
+        var noise = new SimplexNoise(1337);
 
         for (int cx = 0; cx < chunksX; cx++)
         for (int cz = 0; cz < chunksZ; cz++)
@@ -39,7 +40,6 @@ public class World
                         chunk.SetBlockDirect(x, y, z, block);
                 }
             }
-
             chunk.RebuildMesh();
         }
     }
@@ -72,17 +72,28 @@ public class World
         chunk.SetBlock(localX, worldY, localZ, type);
     }
 
-    public IEnumerable<Chunk> GetVisibleChunks(Vector3 cameraPos)
+    // ОБНОВЛЕНО: Теперь принимает Frustum для отсечения
+    public IEnumerable<Chunk> GetVisibleChunks(Vector3 cameraPos, Frustum frustum)
     {
         foreach (var chunk in _chunks.Values)
         {
+            // Быстрая проверка по дистанции (даже если в фрустуме, далеко не рисуем)
             var center = new Vector3(
                 chunk.Position.X * Chunk.SizeX + Chunk.SizeX / 2f,
                 0,
                 chunk.Position.Z * Chunk.SizeZ + Chunk.SizeZ / 2f);
 
-            if ((center - cameraPos).Length < 48f)
+            if ((center - cameraPos).Length > 80f) 
+                continue;
+
+            // Проверка: находится ли чанк в поле зрения камеры
+            var min = new Vector3(chunk.Position.X * Chunk.SizeX, 0, chunk.Position.Z * Chunk.SizeZ);
+            var max = new Vector3(min.X + Chunk.SizeX, Chunk.SizeY, min.Z + Chunk.SizeZ);
+
+            if (frustum.IsBoxVisible(min, max))
+            {
                 yield return chunk;
+            }
         }
     }
 }
