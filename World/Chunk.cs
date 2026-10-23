@@ -6,16 +6,28 @@ namespace MinecraftClone.World;
 public class Chunk
 {
     public const int SizeX = 16;
-    public const int SizeY = 64;
+    public const int SizeY = 128;
     public const int SizeZ = 16;
 
-    public Vector3i Position { get; }
+    public Vector2i Position { get; }
     private readonly BlockType[,,] _blocks = new BlockType[SizeX, SizeY, SizeZ];
     
     public Renderer.ChunkMesh? OpaqueMesh { get; private set; }
     public Renderer.ChunkMesh? TransparentMesh { get; private set; }
+    
+    public bool IsDirty { get; private set; } = true; 
+    
+    // Оптимизация: запоминаем максимальную высоту, чтобы не перебирать пустоту
+    private int _maxHeight = 0;
+    
+    private float[] _opaqueVerts = System.Array.Empty<float>();
+    private uint[] _opaqueInds = System.Array.Empty<uint>();
+    private float[] _transVerts = System.Array.Empty<float>();
+    private uint[] _transInds = System.Array.Empty<uint>();
 
-    public Chunk(Vector3i position) => Position = position;
+    public Chunk(Vector2i position) => Position = position;
+
+    public void SetDirty() => IsDirty = true;
 
     public BlockType GetBlock(int x, int y, int z)
     {
@@ -27,16 +39,18 @@ public class Chunk
     {
         if (x < 0 || x >= SizeX || y < 0 || y >= SizeY || z < 0 || z >= SizeZ) return;
         _blocks[x, y, z] = type;
-        RebuildMesh();
+        IsDirty = true;
+        if (y > _maxHeight) _maxHeight = y;
     }
 
     public void SetBlockDirect(int x, int y, int z, BlockType type)
     {
         if (x < 0 || x >= SizeX || y < 0 || y >= SizeY || z < 0 || z >= SizeZ) return;
         _blocks[x, y, z] = type;
+        if (type != BlockType.Air && y > _maxHeight) _maxHeight = y; // Обновляем высоту
     }
 
-    public void RebuildMesh()
+    public void RebuildMeshData(World world)
     {
         var opaqueVerts = new List<float>();
         var opaqueInds = new List<uint>();
@@ -44,8 +58,9 @@ public class Chunk
         var transVerts = new List<float>();
         var transInds = new List<uint>();
 
+        // Итерируемся только до максимальной высоты, а не до 128!
         for (int x = 0; x < SizeX; x++)
-        for (int y = 0; y < SizeY; y++)
+        for (int y = 0; y <= _maxHeight + 1; y++) // +1 на всякий случай
         for (int z = 0; z < SizeZ; z++)
         {
             var block = _blocks[x, y, z];
@@ -55,37 +70,46 @@ public class Chunk
             var vList = isTrans ? transVerts : opaqueVerts;
             var iList = isTrans ? transInds : opaqueInds;
 
-            AddFaceIfVisible(vList, iList, x, y, z, 0, 1, 0, block, 0);
-            AddFaceIfVisible(vList, iList, x, y, z, 0, -1, 0, block, 1);
-            AddFaceIfVisible(vList, iList, x, y, z, 0, 0, 1, block, 2);
-            AddFaceIfVisible(vList, iList, x, y, z, 0, 0, -1, block, 3);
-            AddFaceIfVisible(vList, iList, x, y, z, -1, 0, 0, block, 4);
-            AddFaceIfVisible(vList, iList, x, y, z, 1, 0, 0, block, 5);
+            AddFaceIfVisible(world, vList, iList, x, y, z, 0, 1, 0, block, 0);
+            AddFaceIfVisible(world, vList, iList, x, y, z, 0, -1, 0, block, 1);
+            AddFaceIfVisible(world, vList, iList, x, y, z, 0, 0, 1, block, 2);
+            AddFaceIfVisible(world, vList, iList, x, y, z, 0, 0, -1, block, 3);
+            AddFaceIfVisible(world, vList, iList, x, y, z, -1, 0, 0, block, 4);
+            AddFaceIfVisible(world, vList, iList, x, y, z, 1, 0, 0, block, 5);
         }
 
-        OpaqueMesh?.Dispose();
-        OpaqueMesh = opaqueVerts.Count > 0 ? new Renderer.ChunkMesh(opaqueVerts.ToArray(), opaqueInds.ToArray()) : null;
-
-        TransparentMesh?.Dispose();
-        TransparentMesh = transVerts.Count > 0 ? new Renderer.ChunkMesh(transVerts.ToArray(), transInds.ToArray()) : null;
+        _opaqueVerts = opaqueVerts.ToArray();
+        _opaqueInds = opaqueInds.ToArray();
+        _transVerts = transVerts.ToArray();
+        _transInds = transInds.ToArray();
     }
 
-    private void AddFaceIfVisible(List<float> verts, List<uint> inds,
+    public void UploadMesh()
+    {
+        OpaqueMesh?.Dispose();
+        OpaqueMesh = _opaqueVerts.Length > 0 ? new Renderer.ChunkMesh(_opaqueVerts, _opaqueInds) : null;
+
+        TransparentMesh?.Dispose();
+        TransparentMesh = _transVerts.Length > 0 ? new Renderer.ChunkMesh(_transVerts, _transInds) : null;
+        
+        IsDirty = false;
+    }
+
+    private void AddFaceIfVisible(World world, List<float> verts, List<uint> inds,
         int x, int y, int z, int dx, int dy, int dz, BlockType block, int faceIndex)
     {
         int nx = x + dx, ny = y + dy, nz = z + dz;
 
-        if (nx >= 0 && nx < SizeX && ny >= 0 && ny < SizeY && nz >= 0 && nz < SizeZ)
-        {
-            BlockType neighbor = _blocks[nx, ny, nz];
-            // Если сосед сплошной, не рисуем грань
-            if (BlockData.IsOpaque(neighbor)) return;
-            // Если сосед такой же прозрачный (например, вода-вода), тоже не рисуем грань
-            if (neighbor == block && BlockData.IsTransparent(block)) return;
-        }
+        int globalX = Position.X * SizeX + nx;
+        int globalZ = Position.Y * SizeZ + nz;
+
+        BlockType neighbor = world.GetBlock(globalX, ny, globalZ);
+
+        if (BlockData.IsOpaque(neighbor)) return;
+        if (neighbor == block && BlockData.IsTransparent(block)) return;
 
         var uv = BlockData.GetUV(block, faceIndex);
-        float X = Position.X * SizeX + x, Y = y, Z = Position.Z * SizeZ + z;
+        float X = Position.X * SizeX + x, Y = y, Z = Position.Y * SizeZ + z;
         float u0 = uv.X, v0 = uv.Y, u1 = uv.Z, v1 = uv.W;
 
         switch (faceIndex)

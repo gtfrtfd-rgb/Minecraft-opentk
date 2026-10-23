@@ -56,7 +56,32 @@ public class SimplexNoise
         float t2 = 0.5f - x2 * x2 - y2 * y2;
         if (t2 > 0) { t2 *= t2; n2 = t2 * t2 * Grad(_perm[ii + 1 + _perm[jj + 1]], x2, y2); }
 
-        return 70f * (n0 + n1 + n2); // примерно в диапазоне [-1, 1]
+        return 70f * (n0 + n1 + n2);
+    }
+
+    // Фрактальный шум для реалистичного рельефа
+    public float FractalNoise(float x, float y, int octaves = 4, float persistence = 0.5f, float lacunarity = 2.0f)
+    {
+        float total = 0;
+        float frequency = 1;
+        float amplitude = 1;
+        float maxValue = 0;
+
+        for (int i = 0; i < octaves; i++)
+        {
+            total += Noise(x * frequency, y * frequency) * amplitude;
+            maxValue += amplitude;
+            amplitude *= persistence;
+            frequency *= lacunarity;
+        }
+
+        return total / maxValue;
+    }
+
+    // 3D шум для пещер (используем 2D шум с разными смещениями для имитации 3D)
+    public float Noise3D(float x, float y, float z)
+    {
+        return Noise(x + z * 0.5f, y + z * 0.5f) * Noise(y - z * 0.5f, x + z * 0.3f);
     }
 
     private static int FastFloor(float x) => x > 0 ? (int)x : (int)x - 1;

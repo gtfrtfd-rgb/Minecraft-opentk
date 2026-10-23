@@ -20,7 +20,6 @@ public class Game : GameWindow
     private Player.PlayerController _controller = null!;
     private Vector2 _lastMousePos;
     private bool _firstMove = true;
-    private bool _isWorldGenerated = false;
 
     private readonly Stopwatch _fpsTimer = Stopwatch.StartNew();
     private int _frameCount = 0;
@@ -49,7 +48,9 @@ public class Game : GameWindow
         _world = new World.World(_atlas);
 
         _camera = new Player.Camera(Vector3.Zero);
-        _controller = new Player.PlayerController(_camera, _world, new Vector3(16, 40, 16));
+        
+        // Спавним игрока ВЫСОКО В НЕБЕ (Y=80), чтобы он упал на землю и не застрял в дереве
+        _controller = new Player.PlayerController(_camera, _world, new Vector3(0, 80, 0));
 
         CursorState = CursorState.Grabbed;
         _lastMousePos = new Vector2(MousePosition.X, MousePosition.Y);
@@ -81,6 +82,8 @@ public class Game : GameWindow
         float dt = Math.Min((float)args.Time, 0.05f);
         _controller.Update(dt, KeyboardState, MouseState);
 
+        _world.UpdateChunks(_controller.Position);
+
         if (MouseState.IsButtonPressed(MouseButton.Left)) _controller.BreakBlock();
         if (MouseState.IsButtonPressed(MouseButton.Right)) _controller.PlaceBlock();
     }
@@ -97,14 +100,6 @@ public class Game : GameWindow
             _fpsTimer.Restart();
         }
 
-        if (!_isWorldGenerated)
-        {
-            Console.WriteLine("Генерация мира...");
-            _world.Generate(8, 8); 
-            _isWorldGenerated = true;
-            Console.WriteLine("Мир готов!");
-        }
-
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         var view = _camera.GetViewMatrix();
@@ -116,28 +111,21 @@ public class Game : GameWindow
         _shader.SetInt("textureAtlas", 0);
         _atlas.Bind(TextureUnit.Texture0);
 
-        // СОЗДАЕМ FRUSTUM
         var frustum = new Frustum(view * proj);
-
-        // ПЕРЕДАЕМ В WORLD
         var visibleChunks = _world.GetVisibleChunks(_camera.Position, frustum).ToList();
 
-        // Проход 1: Непрозрачные
         GL.DepthMask(true);
         foreach (var chunk in visibleChunks) chunk.OpaqueMesh?.Draw(_shader);
 
-        // Обводка
         if (_controller.Raycast(out var targetPos, out _))
         {
             _outline.Draw(new Vector3(targetPos.X, targetPos.Y, targetPos.Z), view, proj);
         }
 
-        // Проход 2: Прозрачные
         GL.DepthMask(false); 
         foreach (var chunk in visibleChunks) chunk.TransparentMesh?.Draw(_shader);
         GL.DepthMask(true);
 
-        // UI...
         GL.Disable(EnableCap.DepthTest);
         _atlas.Bind(TextureUnit.Texture0);
 

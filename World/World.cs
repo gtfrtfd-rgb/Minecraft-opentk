@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using OpenTK.Mathematics;
 using MinecraftClone.Utils;
 
@@ -5,89 +8,207 @@ namespace MinecraftClone.World;
 
 public class World
 {
-    private readonly Dictionary<Vector3i, Chunk> _chunks = new();
+    private readonly ConcurrentDictionary<Vector2i, Chunk> _chunks = new();
     private readonly Renderer.TextureAtlas _atlas;
+    private readonly SimplexNoise _noise;
 
-    public World(Renderer.TextureAtlas atlas) => _atlas = atlas;
+    private readonly ConcurrentQueue<Vector2i> _chunksToGenerate = new();
+    private readonly ConcurrentQueue<Chunk> _chunksToUpload = new();
+    private readonly HashSet<Vector2i> _pendingChunks = new();
+    
+    // Флаг, чтобы не запускать 100 задач одновременно
+    private bool _isGenerating = false; 
 
-    public void Generate(int chunksX, int chunksZ)
+    public World(Renderer.TextureAtlas atlas)
     {
-        var noise = new SimplexNoise(1337);
-
-        for (int cx = 0; cx < chunksX; cx++)
-        for (int cz = 0; cz < chunksZ; cz++)
-        {
-            var chunk = new Chunk(new Vector3i(cx, 0, cz));
-            _chunks[chunk.Position] = chunk;
-
-            for (int x = 0; x < Chunk.SizeX; x++)
-            for (int z = 0; z < Chunk.SizeZ; z++)
-            {
-                int worldX = cx * Chunk.SizeX + x;
-                int worldZ = cz * Chunk.SizeZ + z;
-
-                float n = noise.Noise(worldX * 0.05f, worldZ * 0.05f);
-                int height = (int)(n * 8 + 20);
-
-                for (int y = 0; y < Chunk.SizeY; y++)
-                {
-                    BlockType block = BlockType.Air;
-                    if (y == height) block = BlockType.Grass;
-                    else if (y < height && y > height - 4) block = BlockType.Dirt;
-                    else if (y <= height - 4) block = BlockType.Stone;
-
-                    if (block != BlockType.Air)
-                        chunk.SetBlockDirect(x, y, z, block);
-                }
-            }
-            chunk.RebuildMesh();
-        }
+        _atlas = atlas;
+        _noise = new SimplexNoise(1337);
     }
 
     public BlockType GetBlock(int worldX, int worldY, int worldZ)
     {
-        var chunkPos = new Vector3i(
+        var chunkPos = new Vector2i(
             (int)MathF.Floor(worldX / (float)Chunk.SizeX),
-            0,
             (int)MathF.Floor(worldZ / (float)Chunk.SizeZ));
 
         if (!_chunks.TryGetValue(chunkPos, out var chunk)) return BlockType.Air;
 
         int localX = worldX - chunkPos.X * Chunk.SizeX;
-        int localZ = worldZ - chunkPos.Z * Chunk.SizeZ;
+        int localZ = worldZ - chunkPos.Y * Chunk.SizeZ;
         return chunk.GetBlock(localX, worldY, localZ);
     }
 
     public void SetBlock(int worldX, int worldY, int worldZ, BlockType type)
     {
-        var chunkPos = new Vector3i(
+        var chunkPos = new Vector2i(
             (int)MathF.Floor(worldX / (float)Chunk.SizeX),
-            0,
             (int)MathF.Floor(worldZ / (float)Chunk.SizeZ));
 
         if (!_chunks.TryGetValue(chunkPos, out var chunk)) return;
 
         int localX = worldX - chunkPos.X * Chunk.SizeX;
-        int localZ = worldZ - chunkPos.Z * Chunk.SizeZ;
+        int localZ = worldZ - chunkPos.Y * Chunk.SizeZ;
         chunk.SetBlock(localX, worldY, localZ, type);
+        
+        if (localX == 0) _chunks.GetValueOrDefault(chunkPos + new Vector2i(-1, 0))?.SetDirty();
+        if (localX == Chunk.SizeX - 1) _chunks.GetValueOrDefault(chunkPos + new Vector2i(1, 0))?.SetDirty();
+        if (localZ == 0) _chunks.GetValueOrDefault(chunkPos + new Vector2i(0, -1))?.SetDirty();
+        if (localZ == Chunk.SizeZ - 1) _chunks.GetValueOrDefault(chunkPos + new Vector2i(0, 1))?.SetDirty();
     }
 
-    // ОБНОВЛЕНО: Теперь принимает Frustum для отсечения
+    public void UpdateChunks(Vector3 playerPos, int renderDistance = 4) // УМЕНЬШИЛИ РАДИУС С 6 ДО 4
+    {
+        Vector2i currentChunk = new Vector2i(
+            (int)MathF.Floor(playerPos.X / Chunk.SizeX),
+            (int)MathF.Floor(playerPos.Z / Chunk.SizeZ));
+
+        for (int x = -renderDistance; x <= renderDistance; x++)
+        {
+            for (int z = -renderDistance; z <= renderDistance; z++)
+            {
+                Vector2i pos = currentChunk + new Vector2i(x, z);
+                if (!_chunks.ContainsKey(pos) && !_pendingChunks.Contains(pos))
+                {
+                    _pendingChunks.Add(pos);
+                    _chunksToGenerate.Enqueue(pos);
+                }
+            }
+        }
+
+        // Запускаем генерацию только если она еще не запущена
+        if (!_chunksToGenerate.IsEmpty && !_isGenerating)
+        {
+            _isGenerating = true;
+            Task.Run(() => BackgroundGenerate());
+        }
+
+        int uploaded = 0;
+        while (_chunksToUpload.TryDequeue(out var chunk) && uploaded < 3)
+        {
+            chunk.UploadMesh();
+            _chunks[chunk.Position] = chunk;
+            uploaded++;
+        }
+
+        foreach (var chunk in _chunks.Values)
+        {
+            if (chunk.IsDirty)
+            {
+                chunk.RebuildMeshData(this);
+                chunk.UploadMesh();
+            }
+        }
+
+        int unloadDistance = renderDistance + 2;
+        var chunksToRemove = new List<Vector2i>();
+        foreach (var kvp in _chunks)
+        {
+            if (Math.Abs(kvp.Key.X - currentChunk.X) > unloadDistance || 
+                Math.Abs(kvp.Key.Y - currentChunk.Y) > unloadDistance)
+            {
+                chunksToRemove.Add(kvp.Key);
+            }
+        }
+
+        foreach (var pos in chunksToRemove)
+        {
+            if (_chunks.TryRemove(pos, out var chunk))
+            {
+                chunk.Dispose();
+            }
+        }
+    }
+
+    private void BackgroundGenerate()
+    {
+        while (!_chunksToGenerate.IsEmpty)
+        {
+            if (!_chunksToGenerate.TryDequeue(out var pos)) break;
+
+            Chunk chunk = new Chunk(pos);
+            GenerateChunkData(chunk);
+            chunk.RebuildMeshData(this);
+            _chunksToUpload.Enqueue(chunk);
+            _pendingChunks.Remove(pos);
+        }
+        _isGenerating = false; // Освобождаем флаг, когда очередь пуста
+    }
+
+    private void GenerateChunkData(Chunk chunk)
+    {
+        int cx = chunk.Position.X * Chunk.SizeX;
+        int cz = chunk.Position.Y * Chunk.SizeZ;
+
+        for (int x = 0; x < Chunk.SizeX; x++)
+        for (int z = 0; z < Chunk.SizeZ; z++)
+        {
+            int worldX = cx + x;
+            int worldZ = cz + z;
+
+            float n = _noise.FractalNoise(worldX * 0.01f, worldZ * 0.01f, 3, 0.5f, 2.0f);
+            int height = (int)(n * 8 + 35); 
+
+            for (int y = 0; y <= height; y++) // Итерируемся только до высоты!
+            {
+                BlockType block = BlockType.Air;
+                float caveNoise = _noise.Noise3D(worldX * 0.05f, y * 0.05f, worldZ * 0.05f);
+                bool isCave = caveNoise > 0.4f && y < height - 3;
+
+                if (!isCave)
+                {
+                    if (y == height) block = BlockType.Grass;
+                    else if (y < height && y > height - 4) block = BlockType.Dirt;
+                    else if (y <= height - 4) block = BlockType.Stone;
+                }
+
+                if (block != BlockType.Air)
+                    chunk.SetBlockDirect(x, y, z, block);
+            }
+
+            if (chunk.GetBlock(x, height, z) == BlockType.Grass)
+            {
+                if (x > 2 && x < Chunk.SizeX - 2 && z > 2 && z < Chunk.SizeZ - 2)
+                {
+                    float treeNoise = _noise.Noise(worldX * 0.1f, worldZ * 0.1f);
+                    int hash = Math.Abs(worldX * 31 + worldZ * 17);
+                    if (treeNoise > 0.4f && hash % 15 == 0)
+                    {
+                        GenerateTree(chunk, x, height + 1, z);
+                    }
+                }
+            }
+        }
+    }
+
+    private void GenerateTree(Chunk chunk, int x, int y, int z)
+    {
+        for (int i = 0; i < 5; i++) chunk.SetBlockDirect(x, y + i, z, BlockType.Wood);
+        for (int dy = 2; dy <= 6; dy++)
+        {
+            int radius = dy >= 4 ? 1 : 2;
+            for (int dx = -radius; dx <= radius; dx++)
+            for (int dz = -radius; dz <= radius; dz++)
+            {
+                if (Math.Abs(dx) == radius && Math.Abs(dz) == radius) continue;
+                int px = x + dx, py = y + dy, pz = z + dz;
+                if (px >= 0 && px < Chunk.SizeX && py >= 0 && py < Chunk.SizeY && pz >= 0 && pz < Chunk.SizeZ)
+                {
+                    if (chunk.GetBlock(px, py, pz) == BlockType.Air)
+                        chunk.SetBlockDirect(px, py, pz, BlockType.Leaves);
+                }
+            }
+        }
+        chunk.SetBlockDirect(x, y + 6, z, BlockType.Leaves);
+    }
+
     public IEnumerable<Chunk> GetVisibleChunks(Vector3 cameraPos, Frustum frustum)
     {
         foreach (var chunk in _chunks.Values)
         {
-            // Быстрая проверка по дистанции (даже если в фрустуме, далеко не рисуем)
-            var center = new Vector3(
-                chunk.Position.X * Chunk.SizeX + Chunk.SizeX / 2f,
-                0,
-                chunk.Position.Z * Chunk.SizeZ + Chunk.SizeZ / 2f);
+            var center = new Vector3(chunk.Position.X * Chunk.SizeX + Chunk.SizeX / 2f, 0, chunk.Position.Y * Chunk.SizeZ + Chunk.SizeZ / 2f);
+            if ((center - cameraPos).Length > 80f) continue; // Дистанция видимости чуть меньше
 
-            if ((center - cameraPos).Length > 80f) 
-                continue;
-
-            // Проверка: находится ли чанк в поле зрения камеры
-            var min = new Vector3(chunk.Position.X * Chunk.SizeX, 0, chunk.Position.Z * Chunk.SizeZ);
+            var min = new Vector3(chunk.Position.X * Chunk.SizeX, 0, chunk.Position.Y * Chunk.SizeZ);
             var max = new Vector3(min.X + Chunk.SizeX, Chunk.SizeY, min.Z + Chunk.SizeZ);
 
             if (frustum.IsBoxVisible(min, max))
