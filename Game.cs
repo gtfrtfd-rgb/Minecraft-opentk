@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
@@ -19,12 +20,20 @@ public class Game : GameWindow
     private bool _firstMove = true;
     private bool _isWorldGenerated = false;
 
+    // --- ПЕРЕМЕННЫЕ ДЛЯ СЧЕТЧИКА FPS ---
+    private readonly Stopwatch _fpsTimer = Stopwatch.StartNew();
+    private int _frameCount = 0;
+    private int _currentFps = 0;
+
     public Game(GameWindowSettings gws, NativeWindowSettings nws) : base(gws, nws) { }
 
     protected override void OnLoad()
     {
         base.OnLoad();
         MakeCurrent();
+
+        // ВКЛЮЧАЕМ V-SYNC
+        VSync = VSyncMode.On;
 
         GL.ClearColor(0.5f, 0.7f, 1.0f, 1.0f);
         GL.Enable(EnableCap.DepthTest);
@@ -79,6 +88,15 @@ public class Game : GameWindow
     {
         base.OnRenderFrame(args);
 
+        // --- ОБНОВЛЕНИЕ СЧЕТЧИКА FPS ---
+        _frameCount++;
+        if (_fpsTimer.ElapsedMilliseconds >= 1000)
+        {
+            _currentFps = _frameCount;
+            _frameCount = 0;
+            _fpsTimer.Restart();
+        }
+
         if (!_isWorldGenerated)
         {
             Console.WriteLine("Генерация мира...");
@@ -97,21 +115,14 @@ public class Game : GameWindow
 
         var visibleChunks = _world.GetVisibleChunks(_camera.Position).ToList();
 
-        // --- ПРОХОД 1: Отрисовка НЕПРОЗРАЧНЫХ блоков (Камень, земля) ---
+        // Проход 1: Непрозрачные
         GL.DepthMask(true);
-        foreach (var chunk in visibleChunks)
-        {
-            chunk.OpaqueMesh?.Draw(_shader);
-        }
+        foreach (var chunk in visibleChunks) chunk.OpaqueMesh?.Draw(_shader);
 
-        // --- ПРОХОД 2: Отрисовка ПРОЗРАЧНЫХ блоков (Вода, листва) ---
-        // Отключаем запись в буфер глубины, чтобы вода не перекрывала саму себя
+        // Проход 2: Прозрачные
         GL.DepthMask(false); 
-        foreach (var chunk in visibleChunks)
-        {
-            chunk.TransparentMesh?.Draw(_shader);
-        }
-        GL.DepthMask(true); // Возвращаем обратно
+        foreach (var chunk in visibleChunks) chunk.TransparentMesh?.Draw(_shader);
+        GL.DepthMask(true);
 
         // 3. Рендер UI
         GL.Disable(EnableCap.DepthTest);
@@ -127,6 +138,9 @@ public class Game : GameWindow
         _ui.DrawSolidQuad(cx - 2, cy - 11, 4, 22, new Vector4(0, 0, 0, 0.8f), screenW, screenH);
         _ui.DrawSolidQuad(cx - 10, cy - 1, 20, 2, new Vector4(1, 1, 1, 1f), screenW, screenH);
         _ui.DrawSolidQuad(cx - 1, cy - 10, 2, 20, new Vector4(1, 1, 1, 1f), screenW, screenH);
+
+        // --- СЧЕТЧИК FPS (ИСПОЛЬЗУЕМ _currentFps) ---
+        DrawFPS(_currentFps, 20, 20, 4f, screenW, screenH);
 
         // Хотбар
         float slotSize = 56f;
@@ -165,6 +179,68 @@ public class Game : GameWindow
         GL.Enable(EnableCap.DepthTest);
         SwapBuffers();
     }
+
+    // --- СИСТЕМА ОТРИСОВКИ ЦИФР (МИНИ-ШРИФТ 3x5) ---
+    private void DrawFPS(int fps, float x, float y, float scale, int sw, int sh)
+    {
+        string text = $"FPS: {fps}";
+        float cursorX = x;
+
+        foreach (char c in text)
+        {
+            if (c == 'F') { DrawChar(F, cursorX, y, scale, sw, sh); cursorX += scale * 4; }
+            else if (c == 'P') { DrawChar(P, cursorX, y, scale, sw, sh); cursorX += scale * 4; }
+            else if (c == 'S') { DrawChar(S, cursorX, y, scale, sw, sh); cursorX += scale * 4; }
+            else if (c == ':') { DrawChar(Colon, cursorX, y, scale, sw, sh); cursorX += scale * 2; }
+            else if (c == ' ') { cursorX += scale * 3; }
+            else if (char.IsDigit(c)) 
+            { 
+                DrawChar(Digits[c - '0'], cursorX, y, scale, sw, sh); 
+                cursorX += scale * 4; 
+            }
+        }
+    }
+
+    private void DrawChar(int[] mask, float x, float y, float scale, int sw, int sh)
+    {
+        for (int row = 0; row < 5; row++)
+        {
+            for (int col = 0; col < 3; col++)
+            {
+                if ((mask[row] & (1 << (2 - col))) != 0)
+                {
+                    _ui.DrawSolidQuad(x + col * scale - 1, y + row * scale - 1, scale + 2, scale + 2, new Vector4(0, 0, 0, 0.8f), sw, sh);
+                }
+            }
+        }
+        for (int row = 0; row < 5; row++)
+        {
+            for (int col = 0; col < 3; col++)
+            {
+                if ((mask[row] & (1 << (2 - col))) != 0)
+                {
+                    _ui.DrawSolidQuad(x + col * scale, y + row * scale, scale, scale, new Vector4(1, 1, 1, 1f), sw, sh);
+                }
+            }
+        }
+    }
+
+    private static readonly int[] F = { 0b111, 0b100, 0b111, 0b100, 0b100 };
+    private static readonly int[] P = { 0b111, 0b101, 0b111, 0b100, 0b100 };
+    private static readonly int[] S = { 0b011, 0b100, 0b010, 0b001, 0b110 };
+    private static readonly int[] Colon = { 0b000, 0b010, 0b000, 0b010, 0b000 };
+    private static readonly int[][] Digits = {
+        new int[] { 0b111, 0b101, 0b101, 0b101, 0b111 }, // 0
+        new int[] { 0b010, 0b110, 0b010, 0b010, 0b111 }, // 1
+        new int[] { 0b111, 0b001, 0b111, 0b100, 0b111 }, // 2
+        new int[] { 0b111, 0b001, 0b111, 0b001, 0b111 }, // 3
+        new int[] { 0b101, 0b101, 0b111, 0b001, 0b001 }, // 4
+        new int[] { 0b111, 0b100, 0b111, 0b001, 0b111 }, // 5
+        new int[] { 0b111, 0b100, 0b111, 0b101, 0b111 }, // 6
+        new int[] { 0b111, 0b001, 0b001, 0b001, 0b001 }, // 7
+        new int[] { 0b111, 0b101, 0b111, 0b101, 0b111 }, // 8
+        new int[] { 0b111, 0b101, 0b111, 0b001, 0b111 }  // 9
+    };
 
     protected override void OnResize(ResizeEventArgs e)
     {
