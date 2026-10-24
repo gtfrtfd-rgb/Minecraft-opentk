@@ -34,6 +34,14 @@ public class PlayerController
 
     public void Update(float dt, KeyboardState keyboard, MouseState mouse)
     {
+        if (Position.Y < -10)
+        {
+            Position = new Vector3(Position.X, 80, Position.Z);
+            Velocity = Vector3.Zero;
+            _camera.Position = Position + new Vector3(0, EyeHeight, 0);
+            return;
+        }
+
         Vector3 front = _camera.GetFrontVector();
         front.Y = 0;
         if (front.LengthSquared > 0) front.Normalize();
@@ -108,7 +116,6 @@ public class PlayerController
         }
     }
 
-    // ИЗМЕНЕНО НА PUBLIC
     public bool Raycast(out Vector3i blockPos, out Vector3i normal)
     {
         blockPos = Vector3i.Zero;

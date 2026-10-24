@@ -14,9 +14,11 @@ public class World : System.IDisposable
 
     private readonly ConcurrentQueue<Vector2i> _chunksToGenerate = new();
     private readonly ConcurrentQueue<Chunk> _chunksToUpload = new();
-    private readonly HashSet<Vector2i> _pendingChunks = new();
     
-    private readonly Thread _generationThread;
+    // Используем словарь для потокобезопасности
+    private readonly ConcurrentDictionary<Vector2i, byte> _pendingChunks = new();
+    
+    private readonly List<Thread> _workers = new();
     private volatile bool _isRunning = true;
 
     public World(Renderer.TextureAtlas atlas)
@@ -24,9 +26,24 @@ public class World : System.IDisposable
         _atlas = atlas;
         _noise = new SimplexNoise(1337);
 
-        _generationThread = new Thread(GenerationLoop);
-        _generationThread.IsBackground = true;
-        _generationThread.Start();
+        // Запускаем столько потоков, сколько ядер у процессора (минус 1 для главного)
+        int threadCount = System.Math.Max(1, System.Environment.ProcessorCount - 1);
+        
+        for (int i = 0; i < threadCount; i++)
+        {
+            var thread = new Thread(GenerationLoop);
+            thread.IsBackground = true;
+            thread.Start();
+            _workers.Add(thread);
+        }
+    }
+
+    public bool IsChunkLoaded(int worldX, int worldZ)
+    {
+        var chunkPos = new Vector2i(
+            (int)MathF.Floor(worldX / (float)Chunk.SizeX),
+            (int)MathF.Floor(worldZ / (float)Chunk.SizeZ));
+        return _chunks.ContainsKey(chunkPos);
     }
 
     public BlockType GetBlock(int worldX, int worldY, int worldZ)
@@ -60,27 +77,44 @@ public class World : System.IDisposable
         if (localZ == Chunk.SizeZ - 1) _chunks.GetValueOrDefault(chunkPos + new Vector2i(0, 1))?.SetDirty();
     }
 
-    public void UpdateChunks(Vector3 playerPos, int renderDistance = 5)
+    public void UpdateChunks(Vector3 playerPos, int renderDistance = 10)
     {
         Vector2i currentChunk = new Vector2i(
             (int)MathF.Floor(playerPos.X / Chunk.SizeX),
             (int)MathF.Floor(playerPos.Z / Chunk.SizeZ));
+
+        var missingChunks = new List<Vector2i>();
 
         for (int x = -renderDistance; x <= renderDistance; x++)
         {
             for (int z = -renderDistance; z <= renderDistance; z++)
             {
                 Vector2i pos = currentChunk + new Vector2i(x, z);
-                if (!_chunks.ContainsKey(pos) && !_pendingChunks.Contains(pos))
+                if (!_chunks.ContainsKey(pos) && !_pendingChunks.ContainsKey(pos))
                 {
-                    _pendingChunks.Add(pos);
-                    _chunksToGenerate.Enqueue(pos);
+                    missingChunks.Add(pos);
                 }
             }
         }
 
+        // СОРТИРОВКА: Чанки под ногами генерируются первыми
+        missingChunks.Sort((a, b) => {
+            int distA = (a.X - currentChunk.X) * (a.X - currentChunk.X) + (a.Y - currentChunk.Y) * (a.Y - currentChunk.Y);
+            int distB = (b.X - currentChunk.X) * (b.X - currentChunk.X) + (b.Y - currentChunk.Y) * (b.Y - currentChunk.Y);
+            return distA.CompareTo(distB);
+        });
+
+        foreach (var pos in missingChunks)
+        {
+            if (_pendingChunks.TryAdd(pos, 0))
+            {
+                _chunksToGenerate.Enqueue(pos);
+            }
+        }
+
+        // УВЕЛИЧЕН ЛИМИТ: Грузим на видеокарту до 10 чанков за кадр
         int uploaded = 0;
-        while (_chunksToUpload.TryDequeue(out var chunk) && uploaded < 3)
+        while (_chunksToUpload.TryDequeue(out var chunk) && uploaded < 10)
         {
             chunk.UploadMesh();
             _chunks[chunk.Position] = chunk;
@@ -126,11 +160,11 @@ public class World : System.IDisposable
                 GenerateChunkData(chunk);
                 chunk.RebuildMeshData(this);
                 _chunksToUpload.Enqueue(chunk);
-                _pendingChunks.Remove(pos);
+                _pendingChunks.TryRemove(pos, out _);
             }
             else
             {
-                Thread.Sleep(10); 
+                Thread.Sleep(5); 
             }
         }
     }
@@ -207,7 +241,7 @@ public class World : System.IDisposable
         foreach (var chunk in _chunks.Values)
         {
             var center = new Vector3(chunk.Position.X * Chunk.SizeX + Chunk.SizeX / 2f, 0, chunk.Position.Y * Chunk.SizeZ + Chunk.SizeZ / 2f);
-            if ((center - cameraPos).Length > 80f) continue;
+            if ((center - cameraPos).Length > 200f) continue;
 
             var min = new Vector3(chunk.Position.X * Chunk.SizeX, 0, chunk.Position.Y * Chunk.SizeZ);
             var max = new Vector3(min.X + Chunk.SizeX, Chunk.SizeY, min.Z + Chunk.SizeZ);

@@ -86,26 +86,30 @@ public class Chunk
                         BlockType a = (x[d] >= 0) ? GetBlock(x[0], x[1], x[2]) : BlockType.Air;
                         BlockType b = (x[d] < maxD - 1) ? GetBlock(x[0] + q[0], x[1] + q[1], x[2] + q[2]) : BlockType.Air;
 
-                        bool aTrans = BlockData.IsTransparent(a);
-                        bool bTrans = BlockData.IsTransparent(b);
+                        bool aVisible = a != BlockType.Air;
+                        bool bVisible = b != BlockType.Air;
+                        bool aOpaque = BlockData.IsOpaque(a);
+                        bool bOpaque = BlockData.IsOpaque(b);
 
-                        if (isTransparentPass != aTrans && a != BlockType.Air) { mask[n++] = 0; continue; }
-                        if (isTransparentPass != bTrans && b != BlockType.Air) { mask[n++] = 0; continue; }
+                        // Пропускаем, если оба пустые
+                        if (!aVisible && !bVisible) { mask[n++] = 0; continue; }
+                        // Пропускаем, если оба сплошные (грань скрыта)
+                        if (aOpaque && bOpaque) { mask[n++] = 0; continue; }
+                        // Пропускаем, если это одинаковые прозрачные блоки (листва-листва, вода-вода)
+                        if (a == b && !aOpaque) { mask[n++] = 0; continue; }
 
-                        if (a == BlockType.Air && b == BlockType.Air) { mask[n++] = 0; continue; }
-                        
-                        if (a != BlockType.Air && b != BlockType.Air)
+                        // Определяем, должен ли блок рисоваться в текущем проходе
+                        bool aMatchPass = isTransparentPass ? !aOpaque : aOpaque;
+                        bool bMatchPass = isTransparentPass ? !bOpaque : bOpaque;
+
+                        if (aVisible && aMatchPass && !bOpaque)
                         {
-                            if (BlockData.IsOpaque(a) && BlockData.IsOpaque(b)) { mask[n++] = 0; continue; }
-                            if (a == b) { mask[n++] = 0; continue; }
+                            // Рисуем грань блока A (смотрит в +d)
+                            mask[n++] = (int)a * 2 + 1;
                         }
-
-                        if (a != BlockType.Air && (b == BlockType.Air || !BlockData.IsOpaque(b)))
+                        else if (bVisible && bMatchPass && !aOpaque)
                         {
-                            mask[n++] = (int)a * 2 + 1; 
-                        }
-                        else if (b != BlockType.Air && (a == BlockType.Air || !BlockData.IsOpaque(a)))
-                        {
+                            // Рисуем грань блока B (смотрит в -d)
                             mask[n++] = (int)b * 2 + 2;
                         }
                         else
@@ -160,7 +164,7 @@ public class Chunk
 
                         Vector2 uv0, uv1, uv2, uv3;
                         
-                        // ИСПРАВЛЕНО: Для боковых граней (ось X) меняем местами ширину и высоту текстуры
+                        // Правильная ориентация текстур для боковых граней
                         if (d == 0)
                         {
                             uv0 = new Vector2(0, 0);
