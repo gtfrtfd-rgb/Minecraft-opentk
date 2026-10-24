@@ -30,7 +30,8 @@ void main()
     Normal = aNormal;
     TileCoords = aTileCoords;
     gl_Position = projection * view * vec4(aPosition, 1.0);
-}";
+}
+";
 
         string fragmentSource = @"
 #version 330 core
@@ -45,6 +46,7 @@ uniform sampler2D textureAtlas;
 void main()
 {
     vec2 localUV = fract(TexCoord);
+    localUV = clamp(localUV, 0.001, 0.999);
     vec2 finalUV = (TileCoords + localUV) / 16.0;
 
     vec4 texColor = texture(textureAtlas, finalUV);
@@ -59,7 +61,8 @@ void main()
     else if (Normal.x < -0.5) light = 0.6;
 
     FragColor = vec4(texColor.rgb * light, texColor.a);
-}";
+}
+";
 
         int vertexShader = GL.CreateShader(ShaderType.VertexShader);
         GL.ShaderSource(vertexShader, vertexSource);

@@ -123,6 +123,7 @@ public class Game : GameWindow
         foreach (var chunk in visibleChunks) chunk.TransparentMesh?.Draw(_shader);
         GL.DepthMask(true);
 
+        // UI
         GL.Disable(EnableCap.DepthTest);
         _atlas.Bind(TextureUnit.Texture0);
 
@@ -165,7 +166,7 @@ public class Game : GameWindow
             {
                 BlockType blockToDraw = (BlockType)(i + 1);
                 
-                Vector2 tileCoords = BlockData.GetTileCoords(blockToDraw, 0);
+                Vector2 tileCoords = BlockData.GetTileCoords(blockToDraw, 1, 0);
                 var uv = new Vector4(tileCoords.X / 16f, tileCoords.Y / 16f, (tileCoords.X + 1) / 16f, (tileCoords.Y + 1) / 16f);
 
                 float itemSize = isSelected ? slotSize - 8 : slotSize - 16;

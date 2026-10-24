@@ -149,20 +149,38 @@ public class Chunk
                         int face = (c - 1) % 2;
 
                         Vector3 normal = new Vector3(q[0], q[1], q[2]) * (face == 0 ? 1 : -1);
-                        
-                        // ИСПРАВЛЕНО: Передаем d и face для правильного выбора текстуры
                         Vector2 tileCoords = BlockData.GetTileCoords(block, d, face);
 
-                        // ИСПРАВЛЕНО: Добавлен q[0], q[1], q[2] для смещения грани на нужную сторону
-                        Vector3 p0 = new Vector3(x[0], x[1], x[2]) + new Vector3(q[0], q[1], q[2]) + new Vector3(Position.X * SizeX, 0, Position.Y * SizeZ);
+                        Vector3 basePos = new Vector3(x[0], x[1], x[2]) + new Vector3(Position.X * SizeX, 0, Position.Y * SizeZ);
+                        Vector3 p0 = basePos + new Vector3(q[0], q[1], q[2]);
+                        
                         Vector3 p1 = p0 + new Vector3(du[0], du[1], du[2]);
                         Vector3 p2 = p0 + new Vector3(du[0] + dv[0], du[1] + dv[1], du[2] + dv[2]);
                         Vector3 p3 = p0 + new Vector3(dv[0], dv[1], dv[2]);
 
-                        if (face == 0)
-                            AddQuad(verts, inds, p0, p1, p2, p3, new Vector2(0, 0), new Vector2(w, 0), new Vector2(w, h), new Vector2(0, h), normal, tileCoords);
+                        Vector2 uv0, uv1, uv2, uv3;
+                        
+                        // ИСПРАВЛЕНО: Для боковых граней (ось X) меняем местами ширину и высоту текстуры
+                        if (d == 0)
+                        {
+                            uv0 = new Vector2(0, 0);
+                            uv1 = new Vector2(0, w);
+                            uv2 = new Vector2(h, w);
+                            uv3 = new Vector2(h, 0);
+                        }
                         else
-                            AddQuad(verts, inds, p0, p3, p2, p1, new Vector2(0, 0), new Vector2(0, h), new Vector2(w, h), new Vector2(w, 0), normal, tileCoords);
+                        {
+                            uv0 = new Vector2(0, 0);
+                            uv1 = new Vector2(w, 0);
+                            uv2 = new Vector2(w, h);
+                            uv3 = new Vector2(0, h);
+                        }
+
+                        if (face == 0) {
+                            AddQuad(verts, inds, p0, p1, p2, p3, uv0, uv1, uv2, uv3, normal, tileCoords);
+                        } else {
+                            AddQuad(verts, inds, p0, p3, p2, p1, uv0, uv3, uv2, uv1, normal, tileCoords);
+                        }
 
                         for (int l = 0; l < h; l++)
                             for (int k = 0; k < w; k++)
