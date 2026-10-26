@@ -1,12 +1,16 @@
 using System;
+using System.Collections.Generic;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 
 namespace MinecraftClone.Renderer;
 
-public class Shader
+public class Shader : IDisposable
 {
     public int Handle { get; }
+
+    private readonly Dictionary<string, int> _uniformCache = new();
+    private bool _disposed;
 
     public Shader()
     {
@@ -47,10 +51,10 @@ void main()
 {
     vec2 localUV = fract(TexCoord);
     localUV = clamp(localUV, 0.001, 0.999);
-    localUV.y = 1.0 - localUV.y;
+    
     vec2 finalUV = (TileCoords + localUV) / 16.0;
 
-    vec4 texColor = texture(textureAtlas, finalUV);
+    vec4 texColor = textureLod(textureAtlas, finalUV, 0.0);
     if (texColor.a < 0.1) discard;
 
     float light = 1.0;
@@ -80,19 +84,62 @@ void main()
         GL.AttachShader(Handle, fragmentShader);
         GL.LinkProgram(Handle);
 
+        GL.GetProgram(Handle, GetProgramParameterName.LinkStatus, out int linked);
+        if (linked == 0)
+        {
+            string log = GL.GetProgramInfoLog(Handle);
+            GL.DeleteShader(vertexShader);
+            GL.DeleteShader(fragmentShader);
+            GL.DeleteProgram(Handle);
+            throw new Exception($"Ошибка линковки программы шейдера: {log}");
+        }
+
+        GL.DetachShader(Handle, vertexShader);
+        GL.DetachShader(Handle, fragmentShader);
         GL.DeleteShader(vertexShader);
         GL.DeleteShader(fragmentShader);
     }
 
     public void Use() => GL.UseProgram(Handle);
-    public void SetMatrix4(string name, Matrix4 value) => GL.UniformMatrix4(GL.GetUniformLocation(Handle, name), false, ref value);
-    public void SetInt(string name, int value) => GL.Uniform1(GL.GetUniformLocation(Handle, name), value);
+
+    public void SetMatrix4(string name, Matrix4 value)
+    {
+        int loc = GetUniformLocation(name);
+        GL.UniformMatrix4(loc, false, ref value);
+    }
+
+    public void SetInt(string name, int value)
+    {
+        int loc = GetUniformLocation(name);
+        GL.Uniform1(loc, value);
+    }
+
+    private int GetUniformLocation(string name)
+    {
+        if (!_uniformCache.TryGetValue(name, out int loc))
+        {
+            loc = GL.GetUniformLocation(Handle, name);
+            _uniformCache[name] = loc;
+        }
+        return loc;
+    }
 
     private static void CheckCompile(int shader, string type)
     {
         GL.GetShader(shader, ShaderParameter.CompileStatus, out int status);
-        if (status == 0) throw new Exception($"Ошибка компиляции {type} шейдера: {GL.GetShaderInfoLog(shader)}");
+        if (status == 0)
+        {
+            string log = GL.GetShaderInfoLog(shader);
+            GL.DeleteShader(shader);
+            throw new Exception($"Ошибка компиляции {type} шейдера: {log}");
+        }
     }
 
-    public void Dispose() => GL.DeleteProgram(Handle);
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        GL.DeleteProgram(Handle);
+        _uniformCache.Clear();
+    }
 }

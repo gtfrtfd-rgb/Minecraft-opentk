@@ -1,3 +1,4 @@
+using System;
 using OpenTK.Mathematics;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using MinecraftClone.World;
@@ -34,10 +35,19 @@ public class PlayerController
 
     public void Update(float dt, KeyboardState keyboard, MouseState mouse)
     {
-        if (Position.Y < -10)
+        if (Position.Y < -10 || Position.Y > 300)
         {
-            Position = new Vector3(Position.X, 80, Position.Z);
+            Position = new Vector3(Position.X, 150, Position.Z);
             Velocity = Vector3.Zero;
+            _camera.Position = Position + new Vector3(0, EyeHeight, 0);
+            return;
+        }
+
+        // Ждем полной загрузки и отрисовки чанка под игроком
+        if (!_world.IsChunkReady(Position.X, Position.Z))
+        {
+            Velocity = Vector3.Zero;
+            IsGrounded = true; 
             _camera.Position = Position + new Vector3(0, EyeHeight, 0);
             return;
         }
@@ -79,7 +89,11 @@ public class PlayerController
             Vector3 playerSize = new Vector3(PlayerWidth, PlayerHeight, PlayerWidth);
             Position = Physics.Collision.Move(_world, Position, playerSize, ref Velocity, step, out bool onGround);
             
-            if (onGround) IsGrounded = true;
+            if (onGround)
+            {
+                IsGrounded = true;
+                Velocity.Y = 0; 
+            }
         }
 
         _camera.Position = Position + new Vector3(0, EyeHeight, 0);

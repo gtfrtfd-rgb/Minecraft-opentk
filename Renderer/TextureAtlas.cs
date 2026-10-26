@@ -3,9 +3,10 @@ using OpenTK.Graphics.OpenGL4;
 
 namespace MinecraftClone.Renderer;
 
-public class TextureAtlas
+public class TextureAtlas : IDisposable
 {
     public int Handle { get; }
+    private bool _disposed;
 
     public TextureAtlas(int tilesX, int tilesY)
     {
@@ -19,7 +20,7 @@ public class TextureAtlas
         GenerateStone(pixels, width, 1, 15);
         GenerateWoodTop(pixels, width, 4, 15);
         GenerateWoodSide(pixels, width, 5, 15);
-        GenerateLeaves(pixels, width, 6, 15); 
+        GenerateLeaves(pixels, width, 6, 15);
         GenerateSand(pixels, width, 7, 15);
         GenerateWater(pixels, width, 8, 15);
         GenerateGrassSide(pixels, width, 3, 15);
@@ -167,8 +168,7 @@ public class TextureAtlas
         for (int x = 0; x < 16; x++)
         {
             int greenHeight = 3 + rnd.Next(2);
-            // Рисуем зелень сверху
-            for (int y = 15; y > 15 - greenHeight; y--)
+            for (int y = 0; y < greenHeight; y++) 
             {
                 byte v = (byte)rnd.Next(80, 130);
                 SetPixel(p, w, tx, ty, x, y, (byte)(v * 0.5f), v, (byte)(v * 0.25f));
@@ -180,5 +180,12 @@ public class TextureAtlas
     {
         GL.ActiveTexture(unit);
         GL.BindTexture(TextureTarget.Texture2D, Handle);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        GL.DeleteTexture(Handle);
     }
 }

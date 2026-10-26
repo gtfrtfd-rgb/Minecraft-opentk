@@ -10,26 +10,30 @@ namespace MinecraftClone.World;
 public class World : IDisposable
 {
     private readonly ConcurrentDictionary<Vector2i, Chunk> _chunks = new();
-    private readonly Renderer.TextureAtlas _atlas;
     private readonly SimplexNoise _noise;
 
     private readonly ConcurrentQueue<Vector2i> _chunksToGenerate = new();
     private readonly ConcurrentQueue<Chunk> _chunksToUpload = new();
     private readonly ConcurrentDictionary<Vector2i, byte> _pendingChunks = new();
-    
+
+    private readonly Queue<Vector2i> _dirtyQueue = new();
+    private readonly HashSet<Vector2i> _dirtySet = new();
+
     private readonly List<Thread> _workers = new();
     private volatile bool _isRunning = true;
+    private bool _disposed;
 
-    public World(Renderer.TextureAtlas atlas)
+    private const int MaxDirtyRebuildsPerFrame = 4;
+    private const int MaxUploadsPerFrame = 10;
+
+    public World()
     {
-        _atlas = atlas;
         _noise = new SimplexNoise(1337);
 
         int threadCount = Math.Max(1, Environment.ProcessorCount - 1);
         for (int i = 0; i < threadCount; i++)
         {
-            var thread = new Thread(GenerationLoop);
-            thread.IsBackground = true;
+            var thread = new Thread(GenerationLoop) { IsBackground = true, Name = $"WorldGen-{i}" };
             thread.Start();
             _workers.Add(thread);
         }
@@ -59,11 +63,30 @@ public class World : IDisposable
         int localX = worldX - chunkPos.X * Chunk.SizeX;
         int localZ = worldZ - chunkPos.Y * Chunk.SizeZ;
         chunk.SetBlock(localX, worldY, localZ, type);
-        
-        if (localX == 0) _chunks.GetValueOrDefault(chunkPos + new Vector2i(-1, 0))?.SetDirty();
-        if (localX == Chunk.SizeX - 1) _chunks.GetValueOrDefault(chunkPos + new Vector2i(1, 0))?.SetDirty();
-        if (localZ == 0) _chunks.GetValueOrDefault(chunkPos + new Vector2i(0, -1))?.SetDirty();
-        if (localZ == Chunk.SizeZ - 1) _chunks.GetValueOrDefault(chunkPos + new Vector2i(0, 1))?.SetDirty();
+        MarkChunkDirty(chunkPos);
+
+        if (localX == 0) MarkChunkDirty(chunkPos + new Vector2i(-1, 0));
+        if (localX == Chunk.SizeX - 1) MarkChunkDirty(chunkPos + new Vector2i(1, 0));
+        if (localZ == 0) MarkChunkDirty(chunkPos + new Vector2i(0, -1));
+        if (localZ == Chunk.SizeZ - 1) MarkChunkDirty(chunkPos + new Vector2i(0, 1));
+    }
+
+    public bool IsChunkReady(float worldX, float worldZ)
+    {
+        var chunkPos = new Vector2i(
+            (int)MathF.Floor(worldX / Chunk.SizeX),
+            (int)MathF.Floor(worldZ / Chunk.SizeZ));
+        if (_chunks.TryGetValue(chunkPos, out var chunk))
+        {
+            return chunk.IsUploaded;
+        }
+        return false;
+    }
+
+    private void MarkChunkDirty(Vector2i pos)
+    {
+        if (!_chunks.ContainsKey(pos)) return;
+        if (_dirtySet.Add(pos)) _dirtyQueue.Enqueue(pos);
     }
 
     public void UpdateChunks(Vector3 playerPos, int renderDistance = 8)
@@ -86,7 +109,8 @@ public class World : IDisposable
             }
         }
 
-        missingChunks.Sort((a, b) => {
+        missingChunks.Sort((a, b) =>
+        {
             int distA = (a.X - currentChunk.X) * (a.X - currentChunk.X) + (a.Y - currentChunk.Y) * (a.Y - currentChunk.Y);
             int distB = (b.X - currentChunk.X) * (b.X - currentChunk.X) + (b.Y - currentChunk.Y) * (b.Y - currentChunk.Y);
             return distA.CompareTo(distB);
@@ -101,19 +125,28 @@ public class World : IDisposable
         }
 
         int uploaded = 0;
-        while (_chunksToUpload.TryDequeue(out var chunk) && uploaded < 10)
+        while (_chunksToUpload.TryDequeue(out var chunk) && uploaded < MaxUploadsPerFrame)
         {
             chunk.UploadMesh();
-            _chunks[chunk.Position] = chunk;
             uploaded++;
+            
+            MarkChunkDirty(chunk.Position);
+            MarkChunkDirty(chunk.Position + new Vector2i(1, 0));
+            MarkChunkDirty(chunk.Position + new Vector2i(-1, 0));
+            MarkChunkDirty(chunk.Position + new Vector2i(0, 1));
+            MarkChunkDirty(chunk.Position + new Vector2i(0, -1));
         }
 
-        foreach (var chunk in _chunks.Values)
+        int rebuilt = 0;
+        while (_dirtyQueue.Count > 0 && rebuilt < MaxDirtyRebuildsPerFrame)
         {
-            if (chunk.IsDirty)
+            var pos = _dirtyQueue.Dequeue();
+            _dirtySet.Remove(pos);
+            if (_chunks.TryGetValue(pos, out var chunk) && chunk.IsDirty)
             {
                 chunk.RebuildMeshData(this);
                 chunk.UploadMesh();
+                rebuilt++;
             }
         }
 
@@ -121,7 +154,7 @@ public class World : IDisposable
         var chunksToRemove = new List<Vector2i>();
         foreach (var kvp in _chunks)
         {
-            if (Math.Abs(kvp.Key.X - currentChunk.X) > unloadDistance || 
+            if (Math.Abs(kvp.Key.X - currentChunk.X) > unloadDistance ||
                 Math.Abs(kvp.Key.Y - currentChunk.Y) > unloadDistance)
             {
                 chunksToRemove.Add(kvp.Key);
@@ -134,6 +167,7 @@ public class World : IDisposable
             {
                 chunk.Dispose();
             }
+            _dirtySet.Remove(pos);
         }
     }
 
@@ -143,15 +177,17 @@ public class World : IDisposable
         {
             if (_chunksToGenerate.TryDequeue(out var pos))
             {
-                Chunk chunk = new Chunk(pos);
+                if (!_isRunning) break;
+                var chunk = new Chunk(pos);
                 GenerateChunkData(chunk);
                 chunk.RebuildMeshData(this);
+                _chunks[pos] = chunk; 
                 _chunksToUpload.Enqueue(chunk);
                 _pendingChunks.TryRemove(pos, out _);
             }
             else
             {
-                Thread.Sleep(5); 
+                Thread.Sleep(5);
             }
         }
     }
@@ -168,9 +204,9 @@ public class World : IDisposable
             int worldZ = cz + z;
 
             float n = _noise.FractalNoise(worldX * 0.01f, worldZ * 0.01f, 3, 0.5f, 2.0f);
-            int height = (int)(n * 8 + 35); 
+            int height = (int)(n * 8 + 35);
 
-            for (int y = 0; y <= height; y++) 
+            for (int y = 0; y <= height; y++)
             {
                 BlockType block = BlockType.Air;
                 float caveNoise = _noise.Noise3D(worldX * 0.05f, y * 0.05f, worldZ * 0.05f);
@@ -192,7 +228,7 @@ public class World : IDisposable
                 if (x > 2 && x < Chunk.SizeX - 2 && z > 2 && z < Chunk.SizeZ - 2)
                 {
                     int hash = Math.Abs(worldX * 71 + worldZ * 37);
-                    if (hash % 150 == 0) 
+                    if (hash % 150 == 0)
                     {
                         GenerateTree(chunk, x, height + 1, z);
                     }
@@ -204,7 +240,7 @@ public class World : IDisposable
     private void GenerateTree(Chunk chunk, int x, int y, int z)
     {
         var rnd = new Random(Math.Abs(x * 31 + z * 17));
-        int height = 4 + rnd.Next(2); 
+        int height = 4 + rnd.Next(2);
 
         for (int i = 0; i < height; i++)
             chunk.SetBlockDirect(x, y + i, z, BlockType.Wood);
@@ -215,7 +251,7 @@ public class World : IDisposable
         for (int dz = -1; dz <= 1; dz++)
         {
             if (Math.Abs(dx) == 1 && Math.Abs(dz) == 1) continue;
-            if (rnd.NextDouble() < 0.2) continue; 
+            if (rnd.NextDouble() < 0.2) continue;
             SetLeaf(chunk, x + dx, topY - 2, z + dz);
         }
 
@@ -225,7 +261,7 @@ public class World : IDisposable
             for (int dz = -2; dz <= 2; dz++)
             {
                 if (Math.Abs(dx) == 2 && Math.Abs(dz) == 2) continue;
-                if (rnd.NextDouble() < 0.2) continue; 
+                if (rnd.NextDouble() < 0.2) continue;
                 SetLeaf(chunk, x + dx, topY + dy, z + dz);
             }
         }
@@ -234,7 +270,7 @@ public class World : IDisposable
         for (int dz = -1; dz <= 1; dz++)
         {
             if (Math.Abs(dx) == 1 && Math.Abs(dz) == 1) continue;
-            if (rnd.NextDouble() < 0.2) continue; 
+            if (rnd.NextDouble() < 0.2) continue;
             SetLeaf(chunk, x + dx, topY + 1, z + dz);
         }
 
@@ -254,8 +290,9 @@ public class World : IDisposable
         }
     }
 
-    public IEnumerable<Chunk> GetVisibleChunks(Vector3 cameraPos, Frustum frustum)
+    public void GetVisibleChunks(Vector3 cameraPos, Frustum frustum, List<Chunk> result)
     {
+        result.Clear();
         foreach (var chunk in _chunks.Values)
         {
             var center = new Vector3(chunk.Position.X * Chunk.SizeX + Chunk.SizeX / 2f, 0, chunk.Position.Y * Chunk.SizeZ + Chunk.SizeZ / 2f);
@@ -266,13 +303,38 @@ public class World : IDisposable
 
             if (frustum.IsBoxVisible(min, max))
             {
-                yield return chunk;
+                result.Add(chunk);
             }
         }
     }
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
+
         _isRunning = false;
+
+        foreach (var thread in _workers)
+        {
+            if (thread.IsAlive) thread.Join(2000);
+        }
+        _workers.Clear();
+
+        _chunksToGenerate.Clear();
+        while (_chunksToUpload.TryDequeue(out var pendingChunk))
+        {
+            pendingChunk.Dispose();
+        }
+
+        foreach (var chunk in _chunks.Values)
+        {
+            chunk.Dispose();
+        }
+        _chunks.Clear();
+
+        _dirtyQueue.Clear();
+        _dirtySet.Clear();
+        _pendingChunks.Clear();
     }
 }

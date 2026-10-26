@@ -1,3 +1,4 @@
+using System;
 using OpenTK.Mathematics;
 using MinecraftClone.World;
 
@@ -5,11 +6,24 @@ namespace MinecraftClone.Physics;
 
 public static class Collision
 {
-    // ВАЖНО: добавлено ref перед Vector3 velocity
     public static Vector3 Move(World.World world, Vector3 pos, Vector3 size, ref Vector3 velocity, float dt, out bool onGround)
     {
         onGround = false;
         Vector3 newPos = pos;
+
+        // Если мы внутри блока, ищем безопасную позицию
+        if (CheckCollision(world, pos, size))
+        {
+            for (float i = 1f; i <= 256f; i += 1f)
+            {
+                Vector3 testPos = pos + new Vector3(0, i, 0);
+                if (!CheckCollision(world, testPos, size))
+                {
+                    velocity = Vector3.Zero;
+                    return testPos; 
+                }
+            }
+        }
 
         // 1. Движение по X
         newPos.X += velocity.X * dt;
@@ -27,21 +41,20 @@ public static class Collision
             velocity.Z = 0;
         }
 
-        // 3. Движение по Y (гравитация/прыжок)
+        // 3. Движение по Y
         newPos.Y += velocity.Y * dt;
         if (CheckCollision(world, newPos, size))
         {
-            if (velocity.Y < 0) // Если падаем вниз
+            if (velocity.Y < 0) 
             {
                 onGround = true;
                 newPos.Y = (float)Math.Floor(newPos.Y) + 1.0f;
             }
-            else // Если бьемся головой об потолок
+            else 
             {
                 newPos.Y = pos.Y;
             }
-            // Теперь это обнуление сохраняется в PlayerController
-            velocity.Y = 0; 
+            velocity.Y = 0;
         }
 
         return newPos;
