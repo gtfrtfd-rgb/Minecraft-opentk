@@ -47,6 +47,7 @@ void main()
 {
     vec2 localUV = fract(TexCoord);
     localUV = clamp(localUV, 0.001, 0.999);
+    localUV.y = 1.0 - localUV.y;
     vec2 finalUV = (TileCoords + localUV) / 16.0;
 
     vec4 texColor = texture(textureAtlas, finalUV);

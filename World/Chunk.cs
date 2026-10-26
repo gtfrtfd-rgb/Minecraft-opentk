@@ -13,7 +13,8 @@ public class Chunk
     private readonly BlockType[,,] _blocks = new BlockType[SizeX, SizeY, SizeZ];
     
     public Renderer.ChunkMesh? OpaqueMesh { get; private set; }
-    public Renderer.ChunkMesh? TransparentMesh { get; private set; }
+    public Renderer.ChunkMesh? LeafMesh { get; private set; }
+    public Renderer.ChunkMesh? WaterMesh { get; private set; }
     public bool IsDirty { get; private set; } = true; 
 
     public Chunk(Vector2i position) => Position = position;
@@ -41,26 +42,35 @@ public class Chunk
 
     private float[] _opaqueVerts = System.Array.Empty<float>();
     private uint[] _opaqueInds = System.Array.Empty<uint>();
-    private float[] _transVerts = System.Array.Empty<float>();
-    private uint[] _transInds = System.Array.Empty<uint>();
+    private float[] _leafVerts = System.Array.Empty<float>();
+    private uint[] _leafInds = System.Array.Empty<uint>();
+    private float[] _waterVerts = System.Array.Empty<float>();
+    private uint[] _waterInds = System.Array.Empty<uint>();
 
     public void RebuildMeshData(World world)
     {
-        var opaqueVerts = new List<float>();
-        var opaqueInds = new List<uint>();
-        var transVerts = new List<float>();
-        var transInds = new List<uint>();
+        var opaqueVerts = new List<float>(); var opaqueInds = new List<uint>();
+        var leafVerts = new List<float>(); var leafInds = new List<uint>();
+        var waterVerts = new List<float>(); var waterInds = new List<uint>();
 
-        GreedyMesh(world, opaqueVerts, opaqueInds, false);
-        GreedyMesh(world, transVerts, transInds, true);
+        GreedyMesh(world, opaqueVerts, opaqueInds, 0); // Opaque
+        GreedyMesh(world, leafVerts, leafInds, 1);     // Leaves
+        GreedyMesh(world, waterVerts, waterInds, 2);   // Water
 
-        _opaqueVerts = opaqueVerts.ToArray();
-        _opaqueInds = opaqueInds.ToArray();
-        _transVerts = transVerts.ToArray();
-        _transInds = transInds.ToArray();
+        _opaqueVerts = opaqueVerts.ToArray(); _opaqueInds = opaqueInds.ToArray();
+        _leafVerts = leafVerts.ToArray(); _leafInds = leafInds.ToArray();
+        _waterVerts = waterVerts.ToArray(); _waterInds = waterInds.ToArray();
     }
 
-    private void GreedyMesh(World world, List<float> verts, List<uint> inds, bool isTransparentPass)
+    private bool Hides(BlockType target, BlockType neighbor)
+    {
+        if (neighbor == BlockType.Air) return false;
+        if (neighbor == BlockType.Water) return target == BlockType.Water;
+        if (neighbor == BlockType.Leaves) return target == BlockType.Leaves;
+        return true; 
+    }
+
+    private void GreedyMesh(World world, List<float> verts, List<uint> inds, int pass)
     {
         for (int d = 0; d < 3; d++)
         {
@@ -86,36 +96,15 @@ public class Chunk
                         BlockType a = (x[d] >= 0) ? GetBlock(x[0], x[1], x[2]) : BlockType.Air;
                         BlockType b = (x[d] < maxD - 1) ? GetBlock(x[0] + q[0], x[1] + q[1], x[2] + q[2]) : BlockType.Air;
 
-                        bool aVisible = a != BlockType.Air;
-                        bool bVisible = b != BlockType.Air;
-                        bool aOpaque = BlockData.IsOpaque(a);
-                        bool bOpaque = BlockData.IsOpaque(b);
+                        bool aMatch = pass == 0 ? BlockData.IsOpaque(a) : pass == 1 ? a == BlockType.Leaves : a == BlockType.Water;
+                        bool bMatch = pass == 0 ? BlockData.IsOpaque(b) : pass == 1 ? b == BlockType.Leaves : b == BlockType.Water;
 
-                        // Пропускаем, если оба пустые
-                        if (!aVisible && !bVisible) { mask[n++] = 0; continue; }
-                        // Пропускаем, если оба сплошные (грань скрыта)
-                        if (aOpaque && bOpaque) { mask[n++] = 0; continue; }
-                        // Пропускаем, если это одинаковые прозрачные блоки (листва-листва, вода-вода)
-                        if (a == b && !aOpaque) { mask[n++] = 0; continue; }
-
-                        // Определяем, должен ли блок рисоваться в текущем проходе
-                        bool aMatchPass = isTransparentPass ? !aOpaque : aOpaque;
-                        bool bMatchPass = isTransparentPass ? !bOpaque : bOpaque;
-
-                        if (aVisible && aMatchPass && !bOpaque)
-                        {
-                            // Рисуем грань блока A (смотрит в +d)
+                        if (a != BlockType.Air && aMatch && !Hides(a, b))
                             mask[n++] = (int)a * 2 + 1;
-                        }
-                        else if (bVisible && bMatchPass && !aOpaque)
-                        {
-                            // Рисуем грань блока B (смотрит в -d)
+                        else if (b != BlockType.Air && bMatch && !Hides(b, a))
                             mask[n++] = (int)b * 2 + 2;
-                        }
                         else
-                        {
                             mask[n++] = 0;
-                        }
                     }
                 }
 
@@ -144,10 +133,8 @@ public class Chunk
 
                         x[u] = i;
                         x[v] = j;
-                        int[] du = { 0, 0, 0 };
-                        int[] dv = { 0, 0, 0 };
-                        du[u] = w;
-                        dv[v] = h;
+                        int[] du = { 0, 0, 0 }; int[] dv = { 0, 0, 0 };
+                        du[u] = w; dv[v] = h;
 
                         BlockType block = (BlockType)((c - 1) / 2);
                         int face = (c - 1) % 2;
@@ -156,42 +143,35 @@ public class Chunk
                         Vector2 tileCoords = BlockData.GetTileCoords(block, d, face);
 
                         Vector3 basePos = new Vector3(x[0], x[1], x[2]) + new Vector3(Position.X * SizeX, 0, Position.Y * SizeZ);
-                        Vector3 p0 = basePos + new Vector3(q[0], q[1], q[2]);
                         
-                        Vector3 p1 = p0 + new Vector3(du[0], du[1], du[2]);
-                        Vector3 p2 = p0 + new Vector3(du[0] + dv[0], du[1] + dv[1], du[2] + dv[2]);
-                        Vector3 p3 = p0 + new Vector3(dv[0], dv[1], dv[2]);
+                        Vector3 p0, p1, p2, p3;
+                        if (face == 0) {
+                            p0 = basePos + new Vector3(q[0], q[1], q[2]);
+                            p1 = p0 + new Vector3(du[0], du[1], du[2]);
+                            p2 = p0 + new Vector3(du[0] + dv[0], du[1] + dv[1], du[2] + dv[2]);
+                            p3 = p0 + new Vector3(dv[0], dv[1], dv[2]);
+                        } else {
+                            p0 = basePos;
+                            p1 = p0 + new Vector3(du[0], du[1], du[2]);
+                            p2 = p0 + new Vector3(du[0] + dv[0], du[1] + dv[1], du[2] + dv[2]);
+                            p3 = p0 + new Vector3(dv[0], dv[1], dv[2]);
+                        }
 
                         Vector2 uv0, uv1, uv2, uv3;
-                        
-                        // Правильная ориентация текстур для боковых граней
-                        if (d == 0)
-                        {
-                            uv0 = new Vector2(0, 0);
-                            uv1 = new Vector2(0, w);
-                            uv2 = new Vector2(h, w);
-                            uv3 = new Vector2(h, 0);
-                        }
-                        else
-                        {
-                            uv0 = new Vector2(0, 0);
-                            uv1 = new Vector2(w, 0);
-                            uv2 = new Vector2(w, h);
-                            uv3 = new Vector2(0, h);
+                        if (d == 0) {
+                            uv0 = new Vector2(0, 0); uv1 = new Vector2(0, w); uv2 = new Vector2(h, w); uv3 = new Vector2(h, 0);
+                        } else {
+                            uv0 = new Vector2(0, 0); uv1 = new Vector2(w, 0); uv2 = new Vector2(w, h); uv3 = new Vector2(0, h);
                         }
 
-                        if (face == 0) {
-                            AddQuad(verts, inds, p0, p1, p2, p3, uv0, uv1, uv2, uv3, normal, tileCoords);
-                        } else {
-                            AddQuad(verts, inds, p0, p3, p2, p1, uv0, uv3, uv2, uv1, normal, tileCoords);
-                        }
+                        if (face == 0) AddQuad(verts, inds, p0, p1, p2, p3, uv0, uv1, uv2, uv3, normal, tileCoords);
+                        else AddQuad(verts, inds, p0, p3, p2, p1, uv0, uv3, uv2, uv1, normal, tileCoords);
 
                         for (int l = 0; l < h; l++)
                             for (int k = 0; k < w; k++)
                                 mask[n + k + l * maxU] = 0;
 
-                        i += w;
-                        n += w;
+                        i += w; n += w;
                     }
                 }
             }
@@ -221,8 +201,11 @@ public class Chunk
         OpaqueMesh?.Dispose();
         OpaqueMesh = _opaqueVerts.Length > 0 ? new Renderer.ChunkMesh(_opaqueVerts, _opaqueInds) : null;
 
-        TransparentMesh?.Dispose();
-        TransparentMesh = _transVerts.Length > 0 ? new Renderer.ChunkMesh(_transVerts, _transInds) : null;
+        LeafMesh?.Dispose();
+        LeafMesh = _leafVerts.Length > 0 ? new Renderer.ChunkMesh(_leafVerts, _leafInds) : null;
+
+        WaterMesh?.Dispose();
+        WaterMesh = _waterVerts.Length > 0 ? new Renderer.ChunkMesh(_waterVerts, _waterInds) : null;
         
         IsDirty = false;
     }
@@ -230,6 +213,7 @@ public class Chunk
     public void Dispose()
     {
         OpaqueMesh?.Dispose();
-        TransparentMesh?.Dispose();
+        LeafMesh?.Dispose();
+        WaterMesh?.Dispose();
     }
 }

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
@@ -6,7 +7,7 @@ using MinecraftClone.Utils;
 
 namespace MinecraftClone.World;
 
-public class World : System.IDisposable
+public class World : IDisposable
 {
     private readonly ConcurrentDictionary<Vector2i, Chunk> _chunks = new();
     private readonly Renderer.TextureAtlas _atlas;
@@ -14,8 +15,6 @@ public class World : System.IDisposable
 
     private readonly ConcurrentQueue<Vector2i> _chunksToGenerate = new();
     private readonly ConcurrentQueue<Chunk> _chunksToUpload = new();
-    
-    // Используем словарь для потокобезопасности
     private readonly ConcurrentDictionary<Vector2i, byte> _pendingChunks = new();
     
     private readonly List<Thread> _workers = new();
@@ -26,9 +25,7 @@ public class World : System.IDisposable
         _atlas = atlas;
         _noise = new SimplexNoise(1337);
 
-        // Запускаем столько потоков, сколько ядер у процессора (минус 1 для главного)
-        int threadCount = System.Math.Max(1, System.Environment.ProcessorCount - 1);
-        
+        int threadCount = Math.Max(1, Environment.ProcessorCount - 1);
         for (int i = 0; i < threadCount; i++)
         {
             var thread = new Thread(GenerationLoop);
@@ -36,14 +33,6 @@ public class World : System.IDisposable
             thread.Start();
             _workers.Add(thread);
         }
-    }
-
-    public bool IsChunkLoaded(int worldX, int worldZ)
-    {
-        var chunkPos = new Vector2i(
-            (int)MathF.Floor(worldX / (float)Chunk.SizeX),
-            (int)MathF.Floor(worldZ / (float)Chunk.SizeZ));
-        return _chunks.ContainsKey(chunkPos);
     }
 
     public BlockType GetBlock(int worldX, int worldY, int worldZ)
@@ -77,7 +66,7 @@ public class World : System.IDisposable
         if (localZ == Chunk.SizeZ - 1) _chunks.GetValueOrDefault(chunkPos + new Vector2i(0, 1))?.SetDirty();
     }
 
-    public void UpdateChunks(Vector3 playerPos, int renderDistance = 10)
+    public void UpdateChunks(Vector3 playerPos, int renderDistance = 8)
     {
         Vector2i currentChunk = new Vector2i(
             (int)MathF.Floor(playerPos.X / Chunk.SizeX),
@@ -97,7 +86,6 @@ public class World : System.IDisposable
             }
         }
 
-        // СОРТИРОВКА: Чанки под ногами генерируются первыми
         missingChunks.Sort((a, b) => {
             int distA = (a.X - currentChunk.X) * (a.X - currentChunk.X) + (a.Y - currentChunk.Y) * (a.Y - currentChunk.Y);
             int distB = (b.X - currentChunk.X) * (b.X - currentChunk.X) + (b.Y - currentChunk.Y) * (b.Y - currentChunk.Y);
@@ -112,7 +100,6 @@ public class World : System.IDisposable
             }
         }
 
-        // УВЕЛИЧЕН ЛИМИТ: Грузим на видеокарту до 10 чанков за кадр
         int uploaded = 0;
         while (_chunksToUpload.TryDequeue(out var chunk) && uploaded < 10)
         {
@@ -204,9 +191,8 @@ public class World : System.IDisposable
             {
                 if (x > 2 && x < Chunk.SizeX - 2 && z > 2 && z < Chunk.SizeZ - 2)
                 {
-                    float treeNoise = _noise.Noise(worldX * 0.1f, worldZ * 0.1f);
-                    int hash = Math.Abs(worldX * 31 + worldZ * 17);
-                    if (treeNoise > 0.4f && hash % 15 == 0)
+                    int hash = Math.Abs(worldX * 71 + worldZ * 37);
+                    if (hash % 150 == 0) 
                     {
                         GenerateTree(chunk, x, height + 1, z);
                     }
@@ -217,23 +203,55 @@ public class World : System.IDisposable
 
     private void GenerateTree(Chunk chunk, int x, int y, int z)
     {
-        for (int i = 0; i < 5; i++) chunk.SetBlockDirect(x, y + i, z, BlockType.Wood);
-        for (int dy = 2; dy <= 6; dy++)
+        var rnd = new Random(Math.Abs(x * 31 + z * 17));
+        int height = 4 + rnd.Next(2); 
+
+        for (int i = 0; i < height; i++)
+            chunk.SetBlockDirect(x, y + i, z, BlockType.Wood);
+
+        int topY = y + height - 1;
+
+        for (int dx = -1; dx <= 1; dx++)
+        for (int dz = -1; dz <= 1; dz++)
         {
-            int radius = dy >= 4 ? 1 : 2;
-            for (int dx = -radius; dx <= radius; dx++)
-            for (int dz = -radius; dz <= radius; dz++)
+            if (Math.Abs(dx) == 1 && Math.Abs(dz) == 1) continue;
+            if (rnd.NextDouble() < 0.2) continue; 
+            SetLeaf(chunk, x + dx, topY - 2, z + dz);
+        }
+
+        for (int dy = -1; dy <= 0; dy++)
+        {
+            for (int dx = -2; dx <= 2; dx++)
+            for (int dz = -2; dz <= 2; dz++)
             {
-                if (Math.Abs(dx) == radius && Math.Abs(dz) == radius) continue;
-                int px = x + dx, py = y + dy, pz = z + dz;
-                if (px >= 0 && px < Chunk.SizeX && py >= 0 && py < Chunk.SizeY && pz >= 0 && pz < Chunk.SizeZ)
-                {
-                    if (chunk.GetBlock(px, py, pz) == BlockType.Air)
-                        chunk.SetBlockDirect(px, py, pz, BlockType.Leaves);
-                }
+                if (Math.Abs(dx) == 2 && Math.Abs(dz) == 2) continue;
+                if (rnd.NextDouble() < 0.2) continue; 
+                SetLeaf(chunk, x + dx, topY + dy, z + dz);
             }
         }
-        chunk.SetBlockDirect(x, y + 6, z, BlockType.Leaves);
+
+        for (int dx = -1; dx <= 1; dx++)
+        for (int dz = -1; dz <= 1; dz++)
+        {
+            if (Math.Abs(dx) == 1 && Math.Abs(dz) == 1) continue;
+            if (rnd.NextDouble() < 0.2) continue; 
+            SetLeaf(chunk, x + dx, topY + 1, z + dz);
+        }
+
+        if (rnd.NextDouble() > 0.2) SetLeaf(chunk, x, topY + 2, z);
+        if (rnd.NextDouble() > 0.2) SetLeaf(chunk, x + 1, topY + 1, z);
+        if (rnd.NextDouble() > 0.2) SetLeaf(chunk, x - 1, topY + 1, z);
+        if (rnd.NextDouble() > 0.2) SetLeaf(chunk, x, topY + 1, z + 1);
+        if (rnd.NextDouble() > 0.2) SetLeaf(chunk, x, topY + 1, z - 1);
+    }
+
+    private void SetLeaf(Chunk chunk, int x, int y, int z)
+    {
+        if (x >= 0 && x < Chunk.SizeX && y >= 0 && y < Chunk.SizeY && z >= 0 && z < Chunk.SizeZ)
+        {
+            if (chunk.GetBlock(x, y, z) == BlockType.Air)
+                chunk.SetBlockDirect(x, y, z, BlockType.Leaves);
+        }
     }
 
     public IEnumerable<Chunk> GetVisibleChunks(Vector3 cameraPos, Frustum frustum)
@@ -241,7 +259,7 @@ public class World : System.IDisposable
         foreach (var chunk in _chunks.Values)
         {
             var center = new Vector3(chunk.Position.X * Chunk.SizeX + Chunk.SizeX / 2f, 0, chunk.Position.Y * Chunk.SizeZ + Chunk.SizeZ / 2f);
-            if ((center - cameraPos).Length > 200f) continue;
+            if ((center - cameraPos).Length > 150f) continue;
 
             var min = new Vector3(chunk.Position.X * Chunk.SizeX, 0, chunk.Position.Y * Chunk.SizeZ);
             var max = new Vector3(min.X + Chunk.SizeX, Chunk.SizeY, min.Z + Chunk.SizeZ);

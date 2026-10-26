@@ -108,19 +108,26 @@ public class Game : GameWindow
         _shader.SetInt("textureAtlas", 0);
         _atlas.Bind(TextureUnit.Texture0);
 
-        var frustum = new Frustum(view * proj);
+                var frustum = new Frustum(view * proj);
         var visibleChunks = _world.GetVisibleChunks(_camera.Position, frustum).ToList();
 
+        // 1. Отрисовка сплошных блоков
         GL.DepthMask(true);
         foreach (var chunk in visibleChunks) chunk.OpaqueMesh?.Draw(_shader);
 
+        // Обводка блока
         if (_controller.Raycast(out var targetPos, out _))
         {
             _outline.Draw(new Vector3(targetPos.X, targetPos.Y, targetPos.Z), view, proj);
         }
 
+        // 2. Отрисовка ЛИСТВЫ (пишет в глубину, чтобы не просвечивала)
+        GL.DepthMask(true);
+        foreach (var chunk in visibleChunks) chunk.LeafMesh?.Draw(_shader);
+
+        // 3. Отрисовка ВОДЫ (не пишет в глубину, чтобы смешиваться)
         GL.DepthMask(false); 
-        foreach (var chunk in visibleChunks) chunk.TransparentMesh?.Draw(_shader);
+        foreach (var chunk in visibleChunks) chunk.WaterMesh?.Draw(_shader);
         GL.DepthMask(true);
 
         // UI
