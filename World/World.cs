@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using OpenTK.Mathematics;
 using MinecraftClone.Utils;
@@ -13,30 +14,52 @@ public class World : IDisposable
     private readonly SimplexNoise _noise;
 
     private readonly ConcurrentQueue<Vector2i> _chunksToGenerate = new();
+    private readonly ConcurrentQueue<Vector2i> _chunksToRebuild = new();
     private readonly ConcurrentQueue<Chunk> _chunksToUpload = new();
-    private readonly ConcurrentDictionary<Vector2i, byte> _pendingChunks = new();
 
-    private readonly Queue<Vector2i> _dirtyQueue = new();
-    private readonly HashSet<Vector2i> _dirtySet = new();
+    private readonly ConcurrentDictionary<Vector2i, byte> _pendingChunks = new();
+    private readonly ConcurrentDictionary<Vector2i, byte> _dirtySet = new();
+
+    private readonly ConcurrentQueue<Renderer.ChunkMesh> _meshesToDelete = new();
+    private int _framesSinceLastDelete = 0;
+    private const int DeleteDelayFrames = 3;
+    private const int MaxDeletesPerBatch = 16;
 
     private readonly List<Thread> _workers = new();
     private volatile bool _isRunning = true;
     private bool _disposed;
 
-    private const int MaxDirtyRebuildsPerFrame = 4;
-    private const int MaxUploadsPerFrame = 10;
+    private static readonly long UploadBudgetTicks = Stopwatch.Frequency / 500; // 2 мс
+    private const int MaxUploadsPerFrame = 6;
+
+    private readonly List<Vector2i> _missingChunksScratch = new();
+    private readonly List<Vector2i> _chunksToRemoveScratch = new();
+    private readonly ChunkDistanceComparer _distanceComparer = new();
 
     public World()
     {
         _noise = new SimplexNoise(1337);
 
+        // Убрали _workLimit. Воркеры работают на полной скорости, 
+        // но с приоритетом BelowNormal, чтобы не забирать CPU у главного потока.
         int threadCount = Math.Max(1, Environment.ProcessorCount - 1);
         for (int i = 0; i < threadCount; i++)
         {
-            var thread = new Thread(GenerationLoop) { IsBackground = true, Name = $"WorldGen-{i}" };
+            var thread = new Thread(WorkerLoop)
+            {
+                IsBackground = true,
+                Name = $"WorldWorker-{i}",
+                Priority = ThreadPriority.BelowNormal
+            };
             thread.Start();
             _workers.Add(thread);
         }
+    }
+
+    public Chunk? GetChunk(int cx, int cz)
+    {
+        _chunks.TryGetValue(new Vector2i(cx, cz), out var chunk);
+        return chunk;
     }
 
     public BlockType GetBlock(int worldX, int worldY, int worldZ)
@@ -73,30 +96,41 @@ public class World : IDisposable
 
     public bool IsChunkReady(float worldX, float worldZ)
     {
+        float chunkSizeXf = Chunk.SizeX;
+        float chunkSizeZf = Chunk.SizeZ;
         var chunkPos = new Vector2i(
-            (int)MathF.Floor(worldX / Chunk.SizeX),
-            (int)MathF.Floor(worldZ / Chunk.SizeZ));
-        if (_chunks.TryGetValue(chunkPos, out var chunk))
-        {
-            return chunk.IsUploaded;
-        }
-        return false;
+            (int)MathF.Floor(worldX / chunkSizeXf),
+            (int)MathF.Floor(worldZ / chunkSizeZf));
+
+        if (!_chunks.TryGetValue(chunkPos, out var center) || !center.IsUploaded)
+            return false;
+
+        float localX = worldX - chunkPos.X * chunkSizeXf;
+        float localZ = worldZ - chunkPos.Y * chunkSizeZf;
+
+        if (localX < 1f && (!_chunks.TryGetValue(chunkPos + new Vector2i(-1, 0), out var cl) || !cl.IsUploaded)) return false;
+        if (localX > chunkSizeXf - 1f && (!_chunks.TryGetValue(chunkPos + new Vector2i(1, 0), out var cr) || !cr.IsUploaded)) return false;
+        if (localZ < 1f && (!_chunks.TryGetValue(chunkPos + new Vector2i(0, -1), out var cf) || !cf.IsUploaded)) return false;
+        if (localZ > chunkSizeZf - 1f && (!_chunks.TryGetValue(chunkPos + new Vector2i(0, 1), out var cb) || !cb.IsUploaded)) return false;
+
+        return true;
     }
 
     private void MarkChunkDirty(Vector2i pos)
     {
-        if (!_chunks.ContainsKey(pos)) return;
-        if (_dirtySet.Add(pos)) _dirtyQueue.Enqueue(pos);
+        if (!_chunks.TryGetValue(pos, out var chunk)) return;
+        chunk.SetDirty();
+        if (_dirtySet.TryAdd(pos, 0))
+            _chunksToRebuild.Enqueue(pos);
     }
 
-    public void UpdateChunks(Vector3 playerPos, int renderDistance = 8)
+    public void UpdateChunks(Vector3 playerPos, int renderDistance = 6)
     {
         Vector2i currentChunk = new Vector2i(
             (int)MathF.Floor(playerPos.X / Chunk.SizeX),
             (int)MathF.Floor(playerPos.Z / Chunk.SizeZ));
 
-        var missingChunks = new List<Vector2i>();
-
+        _missingChunksScratch.Clear();
         for (int x = -renderDistance; x <= renderDistance; x++)
         {
             for (int z = -renderDistance; z <= renderDistance; z++)
@@ -104,19 +138,15 @@ public class World : IDisposable
                 Vector2i pos = currentChunk + new Vector2i(x, z);
                 if (!_chunks.ContainsKey(pos) && !_pendingChunks.ContainsKey(pos))
                 {
-                    missingChunks.Add(pos);
+                    _missingChunksScratch.Add(pos);
                 }
             }
         }
 
-        missingChunks.Sort((a, b) =>
-        {
-            int distA = (a.X - currentChunk.X) * (a.X - currentChunk.X) + (a.Y - currentChunk.Y) * (a.Y - currentChunk.Y);
-            int distB = (b.X - currentChunk.X) * (b.X - currentChunk.X) + (b.Y - currentChunk.Y) * (b.Y - currentChunk.Y);
-            return distA.CompareTo(distB);
-        });
+        _distanceComparer.Center = currentChunk;
+        _missingChunksScratch.Sort(_distanceComparer);
 
-        foreach (var pos in missingChunks)
+        foreach (var pos in _missingChunksScratch)
         {
             if (_pendingChunks.TryAdd(pos, 0))
             {
@@ -124,71 +154,97 @@ public class World : IDisposable
             }
         }
 
+        long uploadDeadline = Stopwatch.GetTimestamp() + UploadBudgetTicks;
         int uploaded = 0;
-        while (_chunksToUpload.TryDequeue(out var chunk) && uploaded < MaxUploadsPerFrame)
+        while (uploaded < MaxUploadsPerFrame && _chunksToUpload.TryDequeue(out var chunk))
         {
-            chunk.UploadMesh();
+            var oldMeshes = chunk.UploadMesh();
+            foreach (var m in oldMeshes)
+                if (m != null) _meshesToDelete.Enqueue(m);
             uploaded++;
-            
-            MarkChunkDirty(chunk.Position);
-            MarkChunkDirty(chunk.Position + new Vector2i(1, 0));
-            MarkChunkDirty(chunk.Position + new Vector2i(-1, 0));
-            MarkChunkDirty(chunk.Position + new Vector2i(0, 1));
-            MarkChunkDirty(chunk.Position + new Vector2i(0, -1));
+            if (Stopwatch.GetTimestamp() > uploadDeadline) break;
         }
 
-        int rebuilt = 0;
-        while (_dirtyQueue.Count > 0 && rebuilt < MaxDirtyRebuildsPerFrame)
+        _framesSinceLastDelete++;
+        if (_framesSinceLastDelete >= DeleteDelayFrames)
         {
-            var pos = _dirtyQueue.Dequeue();
-            _dirtySet.Remove(pos);
-            if (_chunks.TryGetValue(pos, out var chunk) && chunk.IsDirty)
+            _framesSinceLastDelete = 0;
+            int deleted = 0;
+            while (deleted < MaxDeletesPerBatch && _meshesToDelete.TryDequeue(out var mesh))
             {
-                chunk.RebuildMeshData(this);
-                chunk.UploadMesh();
-                rebuilt++;
+                mesh.Dispose();
+                deleted++;
             }
         }
 
         int unloadDistance = renderDistance + 2;
-        var chunksToRemove = new List<Vector2i>();
+        _chunksToRemoveScratch.Clear();
         foreach (var kvp in _chunks)
         {
             if (Math.Abs(kvp.Key.X - currentChunk.X) > unloadDistance ||
                 Math.Abs(kvp.Key.Y - currentChunk.Y) > unloadDistance)
             {
-                chunksToRemove.Add(kvp.Key);
+                _chunksToRemoveScratch.Add(kvp.Key);
             }
         }
 
-        foreach (var pos in chunksToRemove)
+        foreach (var pos in _chunksToRemoveScratch)
         {
             if (_chunks.TryRemove(pos, out var chunk))
             {
-                chunk.Dispose();
+                var meshes = chunk.ReleaseMeshes();
+                foreach (var m in meshes)
+                    if (m != null) _meshesToDelete.Enqueue(m);
             }
-            _dirtySet.Remove(pos);
+            _dirtySet.TryRemove(pos, out _);
         }
     }
 
-    private void GenerationLoop()
+    private void WorkerLoop()
     {
         while (_isRunning)
         {
-            if (_chunksToGenerate.TryDequeue(out var pos))
+            // Сначала обрабатываем ребилды (реакция на действия игрока), затем генерацию.
+            if (_chunksToRebuild.TryDequeue(out var rebuildPos))
+            {
+                _dirtySet.TryRemove(rebuildPos, out _);
+                if (!_isRunning) break;
+                
+                if (_chunks.TryGetValue(rebuildPos, out var chunk) && chunk.TryClearDirty())
+                {
+                    chunk.RebuildMeshData(this);
+                    _chunksToUpload.Enqueue(chunk);
+                }
+                continue;
+            }
+
+            if (_chunksToGenerate.TryDequeue(out var genPos))
             {
                 if (!_isRunning) break;
-                var chunk = new Chunk(pos);
-                GenerateChunkData(chunk);
-                chunk.RebuildMeshData(this);
-                _chunks[pos] = chunk; 
-                _chunksToUpload.Enqueue(chunk);
-                _pendingChunks.TryRemove(pos, out _);
+                
+                if (_chunks.ContainsKey(genPos))
+                {
+                    _pendingChunks.TryRemove(genPos, out _);
+                    continue;
+                }
+
+                var newChunk = new Chunk(genPos);
+                GenerateChunkData(newChunk);
+                _chunks[genPos] = newChunk;
+
+                // Помечаем соседей dirty (они могут быть уже сгенерированы и нуждаться в обновлении граней)
+                MarkChunkDirty(genPos + new Vector2i(1, 0));
+                MarkChunkDirty(genPos + new Vector2i(-1, 0));
+                MarkChunkDirty(genPos + new Vector2i(0, 1));
+                MarkChunkDirty(genPos + new Vector2i(0, -1));
+
+                newChunk.RebuildMeshData(this);
+                _chunksToUpload.Enqueue(newChunk);
+                _pendingChunks.TryRemove(genPos, out _);
+                continue;
             }
-            else
-            {
-                Thread.Sleep(5);
-            }
+
+            Thread.Sleep(10);
         }
     }
 
@@ -293,10 +349,15 @@ public class World : IDisposable
     public void GetVisibleChunks(Vector3 cameraPos, Frustum frustum, List<Chunk> result)
     {
         result.Clear();
-        foreach (var chunk in _chunks.Values)
+        const float maxDistSq = 150f * 150f;
+        foreach (var kvp in _chunks)
         {
-            var center = new Vector3(chunk.Position.X * Chunk.SizeX + Chunk.SizeX / 2f, 0, chunk.Position.Y * Chunk.SizeZ + Chunk.SizeZ / 2f);
-            if ((center - cameraPos).Length > 150f) continue;
+            var chunk = kvp.Value;
+            var center = new Vector3(
+                chunk.Position.X * Chunk.SizeX + Chunk.SizeX / 2f,
+                0,
+                chunk.Position.Y * Chunk.SizeZ + Chunk.SizeZ / 2f);
+            if ((center - cameraPos).LengthSquared > maxDistSq) continue;
 
             var min = new Vector3(chunk.Position.X * Chunk.SizeX, 0, chunk.Position.Y * Chunk.SizeZ);
             var max = new Vector3(min.X + Chunk.SizeX, Chunk.SizeY, min.Z + Chunk.SizeZ);
@@ -322,19 +383,37 @@ public class World : IDisposable
         _workers.Clear();
 
         _chunksToGenerate.Clear();
-        while (_chunksToUpload.TryDequeue(out var pendingChunk))
+        _chunksToRebuild.Clear();
+
+        while (_chunksToUpload.TryDequeue(out var pending))
         {
-            pendingChunk.Dispose();
+            foreach (var m in pending.ReleaseMeshes()) m?.Dispose();
         }
 
         foreach (var chunk in _chunks.Values)
         {
-            chunk.Dispose();
+            foreach (var m in chunk.ReleaseMeshes()) m?.Dispose();
         }
         _chunks.Clear();
 
-        _dirtyQueue.Clear();
+        while (_meshesToDelete.TryDequeue(out var mesh))
+            mesh.Dispose();
+
         _dirtySet.Clear();
         _pendingChunks.Clear();
+    }
+
+    private sealed class ChunkDistanceComparer : IComparer<Vector2i>
+    {
+        public Vector2i Center;
+
+        public int Compare(Vector2i a, Vector2i b)
+        {
+            int dxA = a.X - Center.X;
+            int dzA = a.Y - Center.Y;
+            int dxB = b.X - Center.X;
+            int dzB = b.Y - Center.Y;
+            return (dxA * dxA + dzA * dzA).CompareTo(dxB * dxB + dzB * dzB);
+        }
     }
 }

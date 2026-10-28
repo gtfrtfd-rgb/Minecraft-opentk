@@ -9,21 +9,23 @@ public class PlayerController
 {
     private readonly Camera _camera;
     private readonly World.World _world;
-    
+
     public Vector3 Position { get; private set; }
     public Vector3 Velocity;
     public bool IsGrounded;
-    
+
     public BlockType SelectedBlock { get; set; } = BlockType.Stone;
 
     private const float PlayerWidth = 0.6f;
     private const float PlayerHeight = 1.8f;
     private const float EyeHeight = 1.62f;
-    
-    private const float Gravity = -24f; 
+
+    private const float Gravity = -24f;
     private const float JumpForce = 8.5f;
     private const float MoveSpeed = 5.5f;
     private const float Reach = 5f;
+
+    private bool _needsSpawn = true;
 
     public PlayerController(Camera camera, World.World world, Vector3 startPosition)
     {
@@ -35,19 +37,28 @@ public class PlayerController
 
     public void Update(float dt, KeyboardState keyboard, MouseState mouse)
     {
+        if (_needsSpawn)
+        {
+            if (!TrySpawn())
+            {
+                _camera.Position = Position + new Vector3(0, EyeHeight, 0);
+                return;
+            }
+            _needsSpawn = false;
+        }
+
         if (Position.Y < -10 || Position.Y > 300)
         {
-            Position = new Vector3(Position.X, 150, Position.Z);
+            // Упали за пределы мира — переспавнимся.
+            _needsSpawn = true;
             Velocity = Vector3.Zero;
-            _camera.Position = Position + new Vector3(0, EyeHeight, 0);
             return;
         }
 
-        // Ждем полной загрузки и отрисовки чанка под игроком
         if (!_world.IsChunkReady(Position.X, Position.Z))
         {
             Velocity = Vector3.Zero;
-            IsGrounded = true; 
+            IsGrounded = true;
             _camera.Position = Position + new Vector3(0, EyeHeight, 0);
             return;
         }
@@ -55,7 +66,7 @@ public class PlayerController
         Vector3 front = _camera.GetFrontVector();
         front.Y = 0;
         if (front.LengthSquared > 0) front.Normalize();
-        
+
         Vector3 right = Vector3.Cross(front, Vector3.UnitY).Normalized();
 
         Vector3 moveDir = Vector3.Zero;
@@ -63,7 +74,7 @@ public class PlayerController
         if (keyboard.IsKeyDown(Keys.S) || keyboard.IsKeyDown(Keys.Down))  moveDir -= front;
         if (keyboard.IsKeyDown(Keys.A) || keyboard.IsKeyDown(Keys.Left))  moveDir -= right;
         if (keyboard.IsKeyDown(Keys.D) || keyboard.IsKeyDown(Keys.Right)) moveDir += right;
-        
+
         if (moveDir.LengthSquared > 0) moveDir.Normalize();
 
         Velocity.X = moveDir.X * MoveSpeed;
@@ -76,8 +87,8 @@ public class PlayerController
         }
 
         float remainingTime = dt;
-        IsGrounded = false; 
-        
+        IsGrounded = false;
+
         while (remainingTime > 0f)
         {
             float step = Math.Min(remainingTime, 0.016f);
@@ -88,15 +99,42 @@ public class PlayerController
 
             Vector3 playerSize = new Vector3(PlayerWidth, PlayerHeight, PlayerWidth);
             Position = Physics.Collision.Move(_world, Position, playerSize, ref Velocity, step, out bool onGround);
-            
+
             if (onGround)
             {
                 IsGrounded = true;
-                Velocity.Y = 0; 
+                Velocity.Y = 0;
             }
         }
 
         _camera.Position = Position + new Vector3(0, EyeHeight, 0);
+    }
+
+    private bool TrySpawn()
+    {
+        if (!_world.IsChunkReady(Position.X, Position.Z)) return false;
+
+        int x = (int)MathF.Floor(Position.X);
+        int z = (int)MathF.Floor(Position.Z);
+
+        // Ищем верхнюю твёрдую поверхность сверху вниз. Так игрок гарантированно
+        // стоит на земле, а не падает с неба.
+        for (int y = Chunk.SizeY - 1; y >= 0; y--)
+        {
+            if (BlockData.IsSolid(_world.GetBlock(x, y, z)))
+            {
+                Position = new Vector3(Position.X, y + 1, Position.Z);
+                Velocity = Vector3.Zero;
+                _camera.Position = Position + new Vector3(0, EyeHeight, 0);
+                return true;
+            }
+        }
+
+        // Странно, но если ничего не нашли — просто ставим на разумную высоту.
+        Position = new Vector3(Position.X, 100, Position.Z);
+        Velocity = Vector3.Zero;
+        _camera.Position = Position + new Vector3(0, EyeHeight, 0);
+        return true;
     }
 
     public void BreakBlock()

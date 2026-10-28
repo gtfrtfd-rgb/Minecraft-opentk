@@ -20,6 +20,10 @@ namespace MinecraftClone
         private Player.Camera _camera = null!;
         private Player.PlayerController _controller = null!;
 
+        // 6 чанков радиуса = 169 чанков вместо 289. Старт в 1.7 раза быстрее,
+        // и при ходьбе через границу генерируется меньше.
+        private const int RenderDistance = 6;
+
         private readonly Frustum _frustum = new();
         private readonly List<Chunk> _visibleChunks = new();
 
@@ -37,14 +41,12 @@ namespace MinecraftClone
             base.OnLoad();
             MakeCurrent();
 
-            VSync = VSyncMode.On;
+            
 
             GL.ClearColor(0.5f, 0.7f, 1.0f, 1.0f);
             GL.Enable(EnableCap.DepthTest);
-            
-            GL.Enable(EnableCap.CullFace); 
+            GL.Enable(EnableCap.CullFace);
             GL.CullFace(CullFaceMode.Back);
-            
             GL.Enable(EnableCap.Blend);
             GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
 
@@ -55,8 +57,7 @@ namespace MinecraftClone
             _world = new World.World();
 
             _camera = new Player.Camera(Vector3.Zero);
-            
-            _controller = new Player.PlayerController(_camera, _world, new Vector3(0, 150, 0));
+            _controller = new Player.PlayerController(_camera, _world, new Vector3(0.5f, 0f, 0.5f));
 
             CursorState = CursorState.Grabbed;
             _lastMousePos = new Vector2(MousePosition.X, MousePosition.Y);
@@ -97,7 +98,7 @@ namespace MinecraftClone
 
             float dt = Math.Min((float)args.Time, 0.05f);
             _controller.Update(dt, KeyboardState, MouseState);
-            _world.UpdateChunks(_controller.Position);
+            _world.UpdateChunks(_controller.Position, RenderDistance);
 
             if (MouseState.IsButtonPressed(MouseButton.Left)) _controller.BreakBlock();
             if (MouseState.IsButtonPressed(MouseButton.Right)) _controller.PlaceBlock();
@@ -130,23 +131,21 @@ namespace MinecraftClone
             _world.GetVisibleChunks(_camera.Position, _frustum, _visibleChunks);
 
             GL.DepthMask(true);
-            foreach (var chunk in _visibleChunks) chunk.OpaqueMesh?.Draw(_shader);
+            foreach (var chunk in _visibleChunks) chunk.OpaqueMesh?.Draw();
 
             if (_controller.Raycast(out var targetPos, out _))
             {
                 _outline.Draw(new Vector3(targetPos.X, targetPos.Y, targetPos.Z), view, proj);
+                _shader.Use();
             }
 
-            // Для листвы и воды отключаем отсечение, так как они прозрачные
             GL.Disable(EnableCap.CullFace);
-            
             GL.DepthMask(true);
-            foreach (var chunk in _visibleChunks) chunk.LeafMesh?.Draw(_shader);
+            foreach (var chunk in _visibleChunks) chunk.LeafMesh?.Draw();
 
             GL.DepthMask(false);
-            foreach (var chunk in _visibleChunks) chunk.WaterMesh?.Draw(_shader);
+            foreach (var chunk in _visibleChunks) chunk.WaterMesh?.Draw();
             GL.DepthMask(true);
-            
             GL.Enable(EnableCap.CullFace);
 
             GL.Disable(EnableCap.DepthTest);
