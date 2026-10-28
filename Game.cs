@@ -41,7 +41,7 @@ namespace MinecraftClone
             base.OnLoad();
             MakeCurrent();
 
-            
+            VSync = VSyncMode.On;
 
             GL.ClearColor(0.5f, 0.7f, 1.0f, 1.0f);
             GL.Enable(EnableCap.DepthTest);
