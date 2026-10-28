@@ -1,5 +1,7 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Threading;
 using OpenTK.Mathematics;
 
@@ -24,14 +26,30 @@ public class Chunk
 
     private ChunkMeshData? _pendingMeshData;
 
+    // Переиспользуемые List'ы — избегаем реаллокаций внутренних массивов между rebuild'ами.
+    private readonly List<float> _opaqueVerts = new(4096);
+    private readonly List<uint> _opaqueInds = new(4096);
+    private readonly List<float> _leafVerts = new(1024);
+    private readonly List<uint> _leafInds = new(1024);
+    private readonly List<float> _waterVerts = new(512);
+    private readonly List<uint> _waterInds = new(512);
+
     public sealed class ChunkMeshData
     {
         public float[] OpaqueVerts = Array.Empty<float>();
+        public int OpaqueVertsLen;
         public uint[] OpaqueInds = Array.Empty<uint>();
+        public int OpaqueIndsLen;
+
         public float[] LeafVerts = Array.Empty<float>();
+        public int LeafVertsLen;
         public uint[] LeafInds = Array.Empty<uint>();
+        public int LeafIndsLen;
+
         public float[] WaterVerts = Array.Empty<float>();
+        public int WaterVertsLen;
         public uint[] WaterInds = Array.Empty<uint>();
+        public int WaterIndsLen;
     }
 
     public Chunk(Vector2i position) => Position = position;
@@ -67,25 +85,42 @@ public class Chunk
         var front = world.GetChunk(Position.X,     Position.Y - 1);
         var back  = world.GetChunk(Position.X,     Position.Y + 1);
 
-        var opaqueVerts = new List<float>(); var opaqueInds = new List<uint>();
-        var leafVerts = new List<float>();   var leafInds = new List<uint>();
-        var waterVerts = new List<float>();  var waterInds = new List<uint>();
+        _opaqueVerts.Clear(); _opaqueInds.Clear();
+        _leafVerts.Clear();   _leafInds.Clear();
+        _waterVerts.Clear();  _waterInds.Clear();
 
-        GreedyMesh(left, right, front, back, opaqueVerts, opaqueInds, 0);
-        GreedyMesh(left, right, front, back, leafVerts, leafInds, 1);
-        GreedyMesh(left, right, front, back, waterVerts, waterInds, 2);
+        GreedyMesh(left, right, front, back, _opaqueVerts, _opaqueInds, 0);
+        GreedyMesh(left, right, front, back, _leafVerts, _leafInds, 1);
+        GreedyMesh(left, right, front, back, _waterVerts, _waterInds, 2);
 
+        // Копируем результат в массивы из ArrayPool — ноль аллокаций в LOH.
         var data = new ChunkMeshData
         {
-            OpaqueVerts = opaqueVerts.ToArray(),
-            OpaqueInds = opaqueInds.ToArray(),
-            LeafVerts = leafVerts.ToArray(),
-            LeafInds = leafInds.ToArray(),
-            WaterVerts = waterVerts.ToArray(),
-            WaterInds = waterInds.ToArray()
+            OpaqueVerts = CopyToPool(_opaqueVerts), OpaqueVertsLen = _opaqueVerts.Count,
+            OpaqueInds = CopyToPool(_opaqueInds),   OpaqueIndsLen = _opaqueInds.Count,
+            LeafVerts = CopyToPool(_leafVerts),     LeafVertsLen = _leafVerts.Count,
+            LeafInds = CopyToPool(_leafInds),       LeafIndsLen = _leafInds.Count,
+            WaterVerts = CopyToPool(_waterVerts),   WaterVertsLen = _waterVerts.Count,
+            WaterInds = CopyToPool(_waterInds),     WaterIndsLen = _waterInds.Count,
         };
 
         Volatile.Write(ref _pendingMeshData, data);
+    }
+
+    private static float[] CopyToPool(List<float> src)
+    {
+        if (src.Count == 0) return Array.Empty<float>();
+        var arr = ArrayPool<float>.Shared.Rent(src.Count);
+        CollectionsMarshal.AsSpan(src).CopyTo(arr.AsSpan());
+        return arr;
+    }
+
+    private static uint[] CopyToPool(List<uint> src)
+    {
+        if (src.Count == 0) return Array.Empty<uint>();
+        var arr = ArrayPool<uint>.Shared.Rent(src.Count);
+        CollectionsMarshal.AsSpan(src).CopyTo(arr.AsSpan());
+        return arr;
     }
 
     private bool Hides(BlockType target, BlockType neighbor)
@@ -265,9 +300,20 @@ public class Chunk
 
         var old = new Renderer.ChunkMesh?[] { OpaqueMesh, LeafMesh, WaterMesh };
 
-        OpaqueMesh = data.OpaqueVerts.Length > 0 ? new Renderer.ChunkMesh(data.OpaqueVerts, data.OpaqueInds) : null;
-        LeafMesh   = data.LeafVerts.Length   > 0 ? new Renderer.ChunkMesh(data.LeafVerts,   data.LeafInds)   : null;
-        WaterMesh  = data.WaterVerts.Length  > 0 ? new Renderer.ChunkMesh(data.WaterVerts,  data.WaterInds)  : null;
+        OpaqueMesh = data.OpaqueVertsLen > 0
+            ? new Renderer.ChunkMesh(data.OpaqueVerts, data.OpaqueVertsLen, data.OpaqueInds, data.OpaqueIndsLen) : null;
+        LeafMesh = data.LeafVertsLen > 0
+            ? new Renderer.ChunkMesh(data.LeafVerts, data.LeafVertsLen, data.LeafInds, data.LeafIndsLen) : null;
+        WaterMesh = data.WaterVertsLen > 0
+            ? new Renderer.ChunkMesh(data.WaterVerts, data.WaterVertsLen, data.WaterInds, data.WaterIndsLen) : null;
+
+        // Возвращаем массивы в пул, чтобы GC не работал.
+        if (data.OpaqueVerts.Length > 0) ArrayPool<float>.Shared.Return(data.OpaqueVerts);
+        if (data.OpaqueInds.Length > 0)  ArrayPool<uint>.Shared.Return(data.OpaqueInds);
+        if (data.LeafVerts.Length > 0)   ArrayPool<float>.Shared.Return(data.LeafVerts);
+        if (data.LeafInds.Length > 0)    ArrayPool<uint>.Shared.Return(data.LeafInds);
+        if (data.WaterVerts.Length > 0)  ArrayPool<float>.Shared.Return(data.WaterVerts);
+        if (data.WaterInds.Length > 0)   ArrayPool<uint>.Shared.Return(data.WaterInds);
 
         IsUploaded = true;
         return old;

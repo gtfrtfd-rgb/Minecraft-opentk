@@ -10,20 +10,17 @@ public class ChunkMesh : IDisposable
     private readonly int _ebo;
     private readonly int _indexCount;
 
-    public ChunkMesh(float[] vertices, uint[] indices)
+    public ChunkMesh(float[] vertices, int vertexFloatCount, uint[] indices, int indexCount)
     {
-        _indexCount = indices.Length;
-        int vertexBytes = vertices.Length * sizeof(float);
-        int indexBytes = indices.Length * sizeof(uint);
+        _indexCount = indexCount;
+        int vertexBytes = vertexFloatCount * sizeof(float);
+        int indexBytes = indexCount * sizeof(uint);
 
         _vao = GL.GenVertexArray();
         GL.BindVertexArray(_vao);
 
         _vbo = GL.GenBuffer();
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
-        // Одиночный BufferData — самый надежный способ залить данные в новый буфер.
-        // Предыдущая попытка с BufferData(IntPtr.Zero) + BufferSubData на некоторых
-        // драйверах приводила к тому, что часть VBO оставалась нулевой (вершины в 0,0,0).
         GL.BufferData(BufferTarget.ArrayBuffer, vertexBytes, vertices, BufferUsageHint.StaticDraw);
 
         _ebo = GL.GenBuffer();
@@ -47,7 +44,6 @@ public class ChunkMesh : IDisposable
     {
         GL.BindVertexArray(_vao);
         GL.DrawElements(PrimitiveType.Triangles, _indexCount, DrawElementsType.UnsignedInt, 0);
-        GL.BindVertexArray(0);
     }
 
     public void Dispose()

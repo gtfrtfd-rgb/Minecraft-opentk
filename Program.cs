@@ -9,9 +9,10 @@ public static class Program
 {
     public static void Main()
     {
-        // Чанки аллоцируют большие массивы (16×128×16 BlockType = 32 КБ) — они попадают в LOH.
-        // SustainedLowLatency запрещает долгие блокирующие паузы GC, жертвуя компактностью хипа.
-        GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
+        // Interactive: короткие паузы на Gen0/Gen1, редкие длинные Gen2.
+        // На слабом CPU (Ryzen 5 2500U) это даёт меньше фризов, чем SustainedLowLatency,
+        // потому что последний иногда провоцирует рост хипа и OutOfMemory-подобные пики.
+        GCSettings.LatencyMode = GCLatencyMode.Interactive;
 
         var nativeSettings = new NativeWindowSettings
         {

@@ -8,18 +8,25 @@ public class UIRenderer : IDisposable
 {
     private int _vao;
     private int _vbo;
+    private int _ebo;
     private int _shader;
 
     private int _locProjection;
-    private int _locColor;
     private int _locTexture;
-    private int _locUseTexture;
 
     private Matrix4 _projection = Matrix4.Identity;
     private int _cachedWidth = -1;
     private int _cachedHeight = -1;
 
-    private readonly float[] _quadBuffer = new float[24];
+    private const int MaxQuads = 4096;
+    private const int MaxVertices = MaxQuads * 4;
+    private const int MaxIndices = MaxQuads * 6;
+    private const int VertexStrideFloats = 9;
+
+    private readonly float[] _vertices = new float[MaxVertices * VertexStrideFloats];
+    private readonly uint[] _indices = new uint[MaxIndices];
+    private int _quadCount = 0;
+
     private bool _disposed;
 
     public UIRenderer()
@@ -28,25 +35,31 @@ public class UIRenderer : IDisposable
 #version 330 core
 layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec2 aTexCoord;
+layout(location = 2) in vec4 aColor;
+layout(location = 3) in float aUseTexture;
 out vec2 TexCoord;
+out vec4 Color;
+out float UseTexture;
 uniform mat4 projection;
 void main() {
     gl_Position = projection * vec4(aPos, 0.0, 1.0);
     TexCoord = aTexCoord;
+    Color = aColor;
+    UseTexture = aUseTexture;
 }";
 
         string frag = @"
 #version 330 core
 in vec2 TexCoord;
+in vec4 Color;
+in float UseTexture;
 out vec4 FragColor;
 uniform sampler2D texture0;
-uniform vec4 colorMultiplier;
-uniform bool useTexture;
 void main() {
-    if (useTexture) {
-        FragColor = texture(texture0, TexCoord) * colorMultiplier;
+    if (UseTexture > 0.5) {
+        FragColor = texture(texture0, TexCoord) * Color;
     } else {
-        FragColor = colorMultiplier;
+        FragColor = Color;
     }
 }";
 
@@ -81,28 +94,32 @@ void main() {
         GL.DeleteShader(fs);
 
         _locProjection = GL.GetUniformLocation(_shader, "projection");
-        _locColor = GL.GetUniformLocation(_shader, "colorMultiplier");
         _locTexture = GL.GetUniformLocation(_shader, "texture0");
-        _locUseTexture = GL.GetUniformLocation(_shader, "useTexture");
 
         _vao = GL.GenVertexArray();
         GL.BindVertexArray(_vao);
 
         _vbo = GL.GenBuffer();
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
+        GL.BufferData(BufferTarget.ArrayBuffer, MaxVertices * VertexStrideFloats * sizeof(float), IntPtr.Zero, BufferUsageHint.StreamDraw);
 
-        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 4 * sizeof(float), 0);
+        _ebo = GL.GenBuffer();
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
+        GL.BufferData(BufferTarget.ElementArrayBuffer, MaxIndices * sizeof(uint), IntPtr.Zero, BufferUsageHint.StreamDraw);
+
+        int stride = VertexStrideFloats * sizeof(float);
+        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, stride, 0);
         GL.EnableVertexAttribArray(0);
-
-        GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, 4 * sizeof(float), 2 * sizeof(float));
+        GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, stride, 2 * sizeof(float));
         GL.EnableVertexAttribArray(1);
+        GL.VertexAttribPointer(2, 4, VertexAttribPointerType.Float, false, stride, 4 * sizeof(float));
+        GL.EnableVertexAttribArray(2);
+        GL.VertexAttribPointer(3, 1, VertexAttribPointerType.Float, false, stride, 8 * sizeof(float));
+        GL.EnableVertexAttribArray(3);
 
         GL.BindVertexArray(0);
     }
 
-    /// <summary>
-    /// Обновляет ортопроекцию под текущий размер окна. Дешёвый no-op при совпадении размеров.
-    /// </summary>
     public void SetScreenSize(int width, int height)
     {
         if (width == _cachedWidth && height == _cachedHeight) return;
@@ -111,33 +128,82 @@ void main() {
         _projection = Matrix4.CreateOrthographicOffCenter(0, width, height, 0, -1, 1);
     }
 
+    public void Begin() => _quadCount = 0;
+
     public void DrawQuad(float x, float y, float width, float height, Vector4 uvRect, Vector4 color)
-        => RenderQuad(x, y, width, height, uvRect, color, true);
+        => AddQuad(x, y, width, height, uvRect, color, true);
 
     public void DrawSolidQuad(float x, float y, float width, float height, Vector4 color)
-        => RenderQuad(x, y, width, height, Vector4.Zero, color, false);
+        => AddQuad(x, y, width, height, Vector4.Zero, color, false);
 
-    private void RenderQuad(float x, float y, float width, float height, Vector4 uvRect, Vector4 color, bool useTexture)
+    private void AddQuad(float x, float y, float width, float height, Vector4 uvRect, Vector4 color, bool useTexture)
     {
-        int i = 0;
-        _quadBuffer[i++] = x;                 _quadBuffer[i++] = y;                 _quadBuffer[i++] = uvRect.X; _quadBuffer[i++] = uvRect.W;
-        _quadBuffer[i++] = x;                 _quadBuffer[i++] = y + height;        _quadBuffer[i++] = uvRect.X; _quadBuffer[i++] = uvRect.Y;
-        _quadBuffer[i++] = x + width;         _quadBuffer[i++] = y + height;        _quadBuffer[i++] = uvRect.Z; _quadBuffer[i++] = uvRect.Y;
-        _quadBuffer[i++] = x;                 _quadBuffer[i++] = y;                 _quadBuffer[i++] = uvRect.X; _quadBuffer[i++] = uvRect.W;
-        _quadBuffer[i++] = x + width;         _quadBuffer[i++] = y + height;        _quadBuffer[i++] = uvRect.Z; _quadBuffer[i++] = uvRect.Y;
-        _quadBuffer[i++] = x + width;         _quadBuffer[i++] = y;                 _quadBuffer[i++] = uvRect.Z; _quadBuffer[i++] = uvRect.W;
+        if (_quadCount >= MaxQuads) return;
+
+        float texFlag = useTexture ? 1.0f : 0.0f;
+        int vOffset = _quadCount * 4 * VertexStrideFloats;
+        int iOffset = _quadCount * 6;
+        int baseVertex = _quadCount * 4;
+
+        // Bottom-Left
+        _vertices[vOffset + 0] = x; _vertices[vOffset + 1] = y;
+        _vertices[vOffset + 2] = uvRect.X; _vertices[vOffset + 3] = uvRect.W;
+        _vertices[vOffset + 4] = color.X; _vertices[vOffset + 5] = color.Y; _vertices[vOffset + 6] = color.Z; _vertices[vOffset + 7] = color.W;
+        _vertices[vOffset + 8] = texFlag;
+
+        // Top-Left
+        vOffset += VertexStrideFloats;
+        _vertices[vOffset + 0] = x; _vertices[vOffset + 1] = y + height;
+        _vertices[vOffset + 2] = uvRect.X; _vertices[vOffset + 3] = uvRect.Y;
+        _vertices[vOffset + 4] = color.X; _vertices[vOffset + 5] = color.Y; _vertices[vOffset + 6] = color.Z; _vertices[vOffset + 7] = color.W;
+        _vertices[vOffset + 8] = texFlag;
+
+        // Top-Right
+        vOffset += VertexStrideFloats;
+        _vertices[vOffset + 0] = x + width; _vertices[vOffset + 1] = y + height;
+        _vertices[vOffset + 2] = uvRect.Z; _vertices[vOffset + 3] = uvRect.Y;
+        _vertices[vOffset + 4] = color.X; _vertices[vOffset + 5] = color.Y; _vertices[vOffset + 6] = color.Z; _vertices[vOffset + 7] = color.W;
+        _vertices[vOffset + 8] = texFlag;
+
+        // Bottom-Right
+        vOffset += VertexStrideFloats;
+        _vertices[vOffset + 0] = x + width; _vertices[vOffset + 1] = y;
+        _vertices[vOffset + 2] = uvRect.Z; _vertices[vOffset + 3] = uvRect.W;
+        _vertices[vOffset + 4] = color.X; _vertices[vOffset + 5] = color.Y; _vertices[vOffset + 6] = color.Z; _vertices[vOffset + 7] = color.W;
+        _vertices[vOffset + 8] = texFlag;
+
+        _indices[iOffset + 0] = (uint)(baseVertex + 0);
+        _indices[iOffset + 1] = (uint)(baseVertex + 1);
+        _indices[iOffset + 2] = (uint)(baseVertex + 2);
+        _indices[iOffset + 3] = (uint)(baseVertex + 0);
+        _indices[iOffset + 4] = (uint)(baseVertex + 2);
+        _indices[iOffset + 5] = (uint)(baseVertex + 3);
+
+        _quadCount++;
+    }
+
+    public void End()
+    {
+        if (_quadCount == 0) return;
 
         GL.BindVertexArray(_vao);
+
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
-        GL.BufferData(BufferTarget.ArrayBuffer, _quadBuffer.Length * sizeof(float), _quadBuffer, BufferUsageHint.StreamDraw);
+        // ORPHANING: сообщаем драйверу, что старое содержимое буфера нам больше не нужно.
+        // Драйвер может выделить новый блок памяти, пока GPU дорисовывает кадр из старого.
+        // Без этого SubData заставляет драйвер ждать окончания работы GPU -> фризы.
+        GL.BufferData(BufferTarget.ArrayBuffer, MaxVertices * VertexStrideFloats * sizeof(float), IntPtr.Zero, BufferUsageHint.StreamDraw);
+        GL.BufferSubData(BufferTarget.ArrayBuffer, IntPtr.Zero, _quadCount * 4 * VertexStrideFloats * sizeof(float), _vertices);
+
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
+        GL.BufferData(BufferTarget.ElementArrayBuffer, MaxIndices * sizeof(uint), IntPtr.Zero, BufferUsageHint.StreamDraw);
+        GL.BufferSubData(BufferTarget.ElementArrayBuffer, IntPtr.Zero, _quadCount * 6 * sizeof(uint), _indices);
 
         GL.UseProgram(_shader);
         GL.UniformMatrix4(_locProjection, false, ref _projection);
-        GL.Uniform4(_locColor, color);
         GL.Uniform1(_locTexture, 0);
-        GL.Uniform1(_locUseTexture, useTexture ? 1 : 0);
 
-        GL.DrawArrays(PrimitiveType.Triangles, 0, 6);
+        GL.DrawElements(PrimitiveType.Triangles, _quadCount * 6, DrawElementsType.UnsignedInt, 0);
         GL.BindVertexArray(0);
     }
 
@@ -157,6 +223,7 @@ void main() {
         if (_disposed) return;
         _disposed = true;
         GL.DeleteBuffer(_vbo);
+        GL.DeleteBuffer(_ebo);
         GL.DeleteVertexArray(_vao);
         GL.DeleteProgram(_shader);
     }

@@ -20,12 +20,16 @@ namespace MinecraftClone
         private Player.Camera _camera = null!;
         private Player.PlayerController _controller = null!;
 
-        // 6 чанков радиуса = 169 чанков вместо 289. Старт в 1.7 раза быстрее,
-        // и при ходьбе через границу генерируется меньше.
-        private const int RenderDistance = 6;
+        // Снижено с 6 до 5 — 121 чанк вместо 169. На iGPU это даёт заметный прирост.
+        private const int RenderDistance = 5;
 
         private readonly Frustum _frustum = new();
         private readonly List<Chunk> _visibleChunks = new();
+
+        private Vector3 _lastCameraPos;
+        private float _lastCameraYaw;
+        private float _lastCameraPitch;
+        private bool _visibleCacheValid = false;
 
         private Vector2 _lastMousePos;
         private bool _firstMove = true;
@@ -33,6 +37,9 @@ namespace MinecraftClone
         private readonly Stopwatch _fpsTimer = Stopwatch.StartNew();
         private int _frameCount = 0;
         private int _currentFps = 0;
+
+        private string _fpsText = "FPS: 0";
+        private int _lastDrawnFps = -1;
 
         public Game(GameWindowSettings gws, NativeWindowSettings nws) : base(gws, nws) { }
 
@@ -127,8 +134,21 @@ namespace MinecraftClone
             _shader.SetInt("textureAtlas", 0);
             _atlas.Bind(TextureUnit.Texture0);
 
-            _frustum.Update(view * proj);
-            _world.GetVisibleChunks(_camera.Position, _frustum, _visibleChunks);
+            bool cameraChanged =
+                _camera.Position != _lastCameraPos ||
+                _camera.Yaw != _lastCameraYaw ||
+                _camera.Pitch != _lastCameraPitch ||
+                !_visibleCacheValid;
+
+            if (cameraChanged)
+            {
+                _frustum.Update(view * proj);
+                _world.GetVisibleChunks(_camera.Position, _frustum, _visibleChunks);
+                _lastCameraPos = _camera.Position;
+                _lastCameraYaw = _camera.Yaw;
+                _lastCameraPitch = _camera.Pitch;
+                _visibleCacheValid = true;
+            }
 
             GL.DepthMask(true);
             foreach (var chunk in _visibleChunks) chunk.OpaqueMesh?.Draw();
@@ -155,6 +175,8 @@ namespace MinecraftClone
             int screenH = Size.Y;
             _ui.SetScreenSize(screenW, screenH);
 
+            _ui.Begin();
+
             float cx = screenW / 2f;
             float cy = screenH / 2f;
 
@@ -163,7 +185,12 @@ namespace MinecraftClone
             _ui.DrawSolidQuad(cx - 10, cy - 1, 20, 2, new Vector4(1, 1, 1, 1f));
             _ui.DrawSolidQuad(cx - 1, cy - 10, 2, 20, new Vector4(1, 1, 1, 1f));
 
-            DrawFPS(_currentFps, 20, 20, 4f);
+            if (_currentFps != _lastDrawnFps)
+            {
+                _fpsText = $"FPS: {_currentFps}";
+                _lastDrawnFps = _currentFps;
+            }
+            DrawFPS(_fpsText, 20, 20, 4f);
 
             float slotSize = 56f;
             float padding = 4f;
@@ -200,13 +227,14 @@ namespace MinecraftClone
                 }
             }
 
+            _ui.End();
+
             GL.Enable(EnableCap.DepthTest);
             SwapBuffers();
         }
 
-        private void DrawFPS(int fps, float x, float y, float scale)
+        private void DrawFPS(string text, float x, float y, float scale)
         {
-            string text = $"FPS: {fps}";
             float cursorX = x;
 
             foreach (char c in text)
