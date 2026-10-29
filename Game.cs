@@ -199,7 +199,8 @@ namespace MinecraftClone
                     _settings.MouseSensitivity = MathHelper.Lerp(0.05f, 0.5f, pct);
                 }
 
-                if (clicked && IsHovered(cx - 150, cy + 110, 150, 30, mouseX, mouseY))
+                // Хитбокс VSync теперь строго 30x30 (только квадратик)
+                if (clicked && IsHovered(cx - 150, cy + 110, 30, 30, mouseX, mouseY))
                 {
                     _settings.VSync = !_settings.VSync;
                     VSync = _settings.VSync ? VSyncMode.On : VSyncMode.Off;
@@ -260,7 +261,6 @@ namespace MinecraftClone
                 _visibleCacheValid = true;
             }
 
-            // === Отрисовка непрозрачной геометрии ===
             GL.DepthMask(true);
             foreach (var chunk in _visibleChunks) chunk.OpaqueMesh?.Draw();
 
@@ -270,9 +270,6 @@ namespace MinecraftClone
                 _shader.Use();
             }
 
-            // === Отрисовка листвы и воды ===
-            // Дополнительный отсев убран. Теперь листва и стволы рисуются вместе,
-            // так как GetVisibleChunks уже отсекает чанки за пределами RenderDistance.
             GL.Disable(EnableCap.CullFace);
             GL.DepthMask(true);
             foreach (var chunk in _visibleChunks)
@@ -288,7 +285,6 @@ namespace MinecraftClone
             GL.DepthMask(true);
             GL.Enable(EnableCap.CullFace);
 
-            // === UI ===
             GL.Disable(EnableCap.DepthTest);
             _atlas.Bind(TextureUnit.Texture0);
 
@@ -402,7 +398,9 @@ namespace MinecraftClone
             float sensPct = (_settings.MouseSensitivity - 0.05f) / 0.45f;
             _ui.DrawSlider(cx - 150, cy + 60, 300, 10, sensPct, 0, 1, IsHovered(cx - 150, cy + 60, 300, 20, mx, my));
 
-            _ui.DrawCheckbox(cx - 150, cy + 110, 30, "VSYNC", _settings.VSync, IsHovered(cx - 150, cy + 110, 150, 30, mx, my));
+            // Передаем 30x30 вместо 150x30, чтобы подсветка при наведении
+            // срабатывала только на квадратике, а не на тексте.
+            _ui.DrawCheckbox(cx - 150, cy + 110, 30, "VSYNC", _settings.VSync, IsHovered(cx - 150, cy + 110, 30, 30, mx, my));
 
             _ui.DrawButton(cx - 100, cy + 160, 200, 40, "BACK", IsHovered(cx - 100, cy + 160, 200, 40, mx, my));
         }
