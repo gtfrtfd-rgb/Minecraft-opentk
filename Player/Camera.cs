@@ -7,6 +7,7 @@ public class Camera
     public Vector3 Position { get; set; }
     public float Yaw { get; set; } = -90f;
     public float Pitch { get; set; } = 0f;
+    public float Fov { get; set; } = 75f; // Новое свойство
     public float Speed { get; set; } = 8f;
 
     public Camera(Vector3 position) => Position = position;
@@ -15,7 +16,7 @@ public class Camera
         => Matrix4.LookAt(Position, Position + GetFrontVector(), Vector3.UnitY);
 
     public Matrix4 GetProjectionMatrix(float aspect)
-        => Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(75f), aspect, 0.1f, 500f);
+        => Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(Fov), aspect, 0.1f, 500f);
 
     public Vector3 GetFrontVector()
     {

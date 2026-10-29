@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 
@@ -18,7 +19,7 @@ public class UIRenderer : IDisposable
     private int _cachedWidth = -1;
     private int _cachedHeight = -1;
 
-    private const int MaxQuads = 4096;
+    private const int MaxQuads = 8192;
     private const int MaxVertices = MaxQuads * 4;
     private const int MaxIndices = MaxQuads * 6;
     private const int VertexStrideFloats = 9;
@@ -26,6 +27,51 @@ public class UIRenderer : IDisposable
     private readonly float[] _vertices = new float[MaxVertices * VertexStrideFloats];
     private readonly uint[] _indices = new uint[MaxIndices];
     private int _quadCount = 0;
+
+    // Пиксельный шрифт 5x5
+    private static readonly Dictionary<char, int[]> Font = new()
+    {
+        {'A', new[]{0b01110, 0b10001, 0b11111, 0b10001, 0b10001}},
+        {'B', new[]{0b11110, 0b10001, 0b11110, 0b10001, 0b11110}},
+        {'C', new[]{0b01111, 0b10000, 0b10000, 0b10000, 0b01111}},
+        {'D', new[]{0b11110, 0b10001, 0b10001, 0b10001, 0b11110}},
+        {'E', new[]{0b11111, 0b10000, 0b11110, 0b10000, 0b11111}},
+        {'F', new[]{0b11111, 0b10000, 0b11110, 0b10000, 0b10000}},
+        {'G', new[]{0b01111, 0b10000, 0b10111, 0b10001, 0b01111}},
+        {'H', new[]{0b10001, 0b10001, 0b11111, 0b10001, 0b10001}},
+        {'I', new[]{0b11111, 0b00100, 0b00100, 0b00100, 0b11111}},
+        {'J', new[]{0b00111, 0b00010, 0b00010, 0b10010, 0b01100}},
+        {'K', new[]{0b10001, 0b10010, 0b11100, 0b10010, 0b10001}},
+        {'L', new[]{0b10000, 0b10000, 0b10000, 0b10000, 0b11111}},
+        {'M', new[]{0b10001, 0b11011, 0b10101, 0b10001, 0b10001}},
+        {'N', new[]{0b10001, 0b11001, 0b10101, 0b10011, 0b10001}},
+        {'O', new[]{0b01110, 0b10001, 0b10001, 0b10001, 0b01110}},
+        {'P', new[]{0b11110, 0b10001, 0b11110, 0b10000, 0b10000}},
+        {'Q', new[]{0b01110, 0b10001, 0b10101, 0b10010, 0b01101}},
+        {'R', new[]{0b11110, 0b10001, 0b11110, 0b10010, 0b10001}},
+        {'S', new[]{0b01111, 0b10000, 0b01110, 0b00001, 0b11110}},
+        {'T', new[]{0b11111, 0b00100, 0b00100, 0b00100, 0b00100}},
+        {'U', new[]{0b10001, 0b10001, 0b10001, 0b10001, 0b01110}},
+        {'V', new[]{0b10001, 0b10001, 0b10001, 0b01010, 0b00100}},
+        {'W', new[]{0b10001, 0b10001, 0b10101, 0b11011, 0b10001}},
+        {'X', new[]{0b10001, 0b01010, 0b00100, 0b01010, 0b10001}},
+        {'Y', new[]{0b10001, 0b01010, 0b00100, 0b00100, 0b00100}},
+        {'Z', new[]{0b11111, 0b00010, 0b00100, 0b01000, 0b11111}},
+        {'0', new[]{0b01110, 0b10011, 0b10101, 0b11001, 0b01110}},
+        {'1', new[]{0b00100, 0b01100, 0b00100, 0b00100, 0b01110}},
+        {'2', new[]{0b01110, 0b10001, 0b00110, 0b01000, 0b11111}},
+        {'3', new[]{0b11110, 0b00001, 0b00110, 0b00001, 0b11110}},
+        {'4', new[]{0b00010, 0b00110, 0b01010, 0b11111, 0b00010}},
+        {'5', new[]{0b11111, 0b10000, 0b11110, 0b00001, 0b11110}},
+        {'6', new[]{0b01110, 0b10000, 0b11110, 0b10001, 0b01110}},
+        {'7', new[]{0b11111, 0b00001, 0b00010, 0b00100, 0b01000}},
+        {'8', new[]{0b01110, 0b10001, 0b01110, 0b10001, 0b01110}},
+        {'9', new[]{0b01110, 0b10001, 0b01111, 0b00001, 0b01110}},
+        {':', new[]{0b00000, 0b00100, 0b00000, 0b00100, 0b00000}},
+        {'-', new[]{0b00000, 0b00000, 0b11111, 0b00000, 0b00000}},
+        {'.', new[]{0b00000, 0b00000, 0b00000, 0b00000, 0b00100}},
+        {' ', new[]{0b00000, 0b00000, 0b00000, 0b00000, 0b00000}}
+    };
 
     private bool _disposed;
 
@@ -136,6 +182,63 @@ void main() {
     public void DrawSolidQuad(float x, float y, float width, float height, Vector4 color)
         => AddQuad(x, y, width, height, Vector4.Zero, color, false);
 
+    public void DrawText(string text, float x, float y, float scale, Vector4 color)
+    {
+        float cursorX = x;
+        foreach (char c in text)
+        {
+            if (Font.TryGetValue(c, out var mask))
+            {
+                for (int row = 0; row < 5; row++)
+                {
+                    for (int col = 0; col < 5; col++)
+                    {
+                        if ((mask[row] & (1 << (4 - col))) != 0)
+                        {
+                            AddQuad(cursorX + col * scale, y + row * scale, scale, scale, Vector4.Zero, color, false);
+                        }
+                    }
+                }
+            }
+            cursorX += 6 * scale;
+        }
+    }
+
+    public void DrawButton(float x, float y, float w, float h, string text, bool isHovered)
+    {
+        Vector4 bgColor = isHovered ? new Vector4(0.3f, 0.3f, 0.3f, 0.9f) : new Vector4(0.2f, 0.2f, 0.2f, 0.8f);
+        DrawSolidQuad(x, y, w, h, bgColor);
+        
+        float textWidth = text.Length * 6 * 4f;
+        DrawText(text, x + (w - textWidth) / 2f, y + (h - 20f) / 2f, 4f, Vector4.One);
+    }
+
+    public void DrawSlider(float x, float y, float w, float h, float value, float min, float max, bool isHovered)
+    {
+        DrawSolidQuad(x, y, w, h, new Vector4(0.2f, 0.2f, 0.2f, 0.8f));
+        
+        float pct = (value - min) / (max - min);
+        DrawSolidQuad(x, y, w * pct, h, new Vector4(0.4f, 0.6f, 0.4f, 1f));
+        
+        float handleWidth = 8f;
+        float handleX = x + w * pct - handleWidth / 2f;
+        Vector4 handleColor = isHovered ? new Vector4(1f, 1f, 1f, 1f) : new Vector4(0.8f, 0.8f, 0.8f, 1f);
+        DrawSolidQuad(handleX, y - 4, handleWidth, h + 8, handleColor);
+    }
+
+    public void DrawCheckbox(float x, float y, float size, string text, bool isChecked, bool isHovered)
+    {
+        Vector4 bgColor = isHovered ? new Vector4(0.3f, 0.3f, 0.3f, 0.9f) : new Vector4(0.2f, 0.2f, 0.2f, 0.8f);
+        DrawSolidQuad(x, y, size, size, bgColor);
+        
+        if (isChecked)
+        {
+            DrawSolidQuad(x + 4, y + 4, size - 8, size - 8, new Vector4(0.4f, 0.8f, 0.4f, 1f));
+        }
+        
+        DrawText(text, x + size + 10, y + (size - 20f) / 2f, 4f, Vector4.One);
+    }
+
     private void AddQuad(float x, float y, float width, float height, Vector4 uvRect, Vector4 color, bool useTexture)
     {
         if (_quadCount >= MaxQuads) return;
@@ -145,27 +248,27 @@ void main() {
         int iOffset = _quadCount * 6;
         int baseVertex = _quadCount * 4;
 
-        // Bottom-Left
+        // Top-Left
         _vertices[vOffset + 0] = x; _vertices[vOffset + 1] = y;
         _vertices[vOffset + 2] = uvRect.X; _vertices[vOffset + 3] = uvRect.W;
         _vertices[vOffset + 4] = color.X; _vertices[vOffset + 5] = color.Y; _vertices[vOffset + 6] = color.Z; _vertices[vOffset + 7] = color.W;
         _vertices[vOffset + 8] = texFlag;
 
-        // Top-Left
+        // Bottom-Left
         vOffset += VertexStrideFloats;
         _vertices[vOffset + 0] = x; _vertices[vOffset + 1] = y + height;
         _vertices[vOffset + 2] = uvRect.X; _vertices[vOffset + 3] = uvRect.Y;
         _vertices[vOffset + 4] = color.X; _vertices[vOffset + 5] = color.Y; _vertices[vOffset + 6] = color.Z; _vertices[vOffset + 7] = color.W;
         _vertices[vOffset + 8] = texFlag;
 
-        // Top-Right
+        // Bottom-Right
         vOffset += VertexStrideFloats;
         _vertices[vOffset + 0] = x + width; _vertices[vOffset + 1] = y + height;
         _vertices[vOffset + 2] = uvRect.Z; _vertices[vOffset + 3] = uvRect.Y;
         _vertices[vOffset + 4] = color.X; _vertices[vOffset + 5] = color.Y; _vertices[vOffset + 6] = color.Z; _vertices[vOffset + 7] = color.W;
         _vertices[vOffset + 8] = texFlag;
 
-        // Bottom-Right
+        // Top-Right
         vOffset += VertexStrideFloats;
         _vertices[vOffset + 0] = x + width; _vertices[vOffset + 1] = y;
         _vertices[vOffset + 2] = uvRect.Z; _vertices[vOffset + 3] = uvRect.W;
@@ -189,15 +292,12 @@ void main() {
         GL.BindVertexArray(_vao);
 
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
-        // ORPHANING: сообщаем драйверу, что старое содержимое буфера нам больше не нужно.
-        // Драйвер может выделить новый блок памяти, пока GPU дорисовывает кадр из старого.
-        // Без этого SubData заставляет драйвер ждать окончания работы GPU -> фризы.
-        GL.BufferData(BufferTarget.ArrayBuffer, MaxVertices * VertexStrideFloats * sizeof(float), IntPtr.Zero, BufferUsageHint.StreamDraw);
-        GL.BufferSubData(BufferTarget.ArrayBuffer, IntPtr.Zero, _quadCount * 4 * VertexStrideFloats * sizeof(float), _vertices);
+        // Для UI используем прямой BufferData с данными (без orphan). 
+        // На драйверах AMD это работает надежнее и без визуальных артефактов.
+        GL.BufferData(BufferTarget.ArrayBuffer, _quadCount * 4 * VertexStrideFloats * sizeof(float), _vertices, BufferUsageHint.StreamDraw);
 
         GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
-        GL.BufferData(BufferTarget.ElementArrayBuffer, MaxIndices * sizeof(uint), IntPtr.Zero, BufferUsageHint.StreamDraw);
-        GL.BufferSubData(BufferTarget.ElementArrayBuffer, IntPtr.Zero, _quadCount * 6 * sizeof(uint), _indices);
+        GL.BufferData(BufferTarget.ElementArrayBuffer, _quadCount * 6 * sizeof(uint), _indices, BufferUsageHint.StreamDraw);
 
         GL.UseProgram(_shader);
         GL.UniformMatrix4(_locProjection, false, ref _projection);

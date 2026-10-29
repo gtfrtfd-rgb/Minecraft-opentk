@@ -1,4 +1,6 @@
+using System;
 using System.Runtime;
+using System.Runtime.InteropServices;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Mathematics;
@@ -7,11 +9,19 @@ namespace MinecraftClone;
 
 public static class Program
 {
+    // Отключает масштабирование DPI в Windows. Без этого координаты мыши
+    // возвращаются в логических пикселях, а рендер идёт в физических — хитбоксы
+    // кнопок "уезжают". Этот вызов должен быть ДО создания окна.
+    [DllImport("user32.dll")]
+    private static extern bool SetProcessDPIAware();
+
     public static void Main()
     {
-        // Interactive: короткие паузы на Gen0/Gen1, редкие длинные Gen2.
-        // На слабом CPU (Ryzen 5 2500U) это даёт меньше фризов, чем SustainedLowLatency,
-        // потому что последний иногда провоцирует рост хипа и OutOfMemory-подобные пики.
+        if (OperatingSystem.IsWindows())
+        {
+            SetProcessDPIAware();
+        }
+
         GCSettings.LatencyMode = GCLatencyMode.Interactive;
 
         var nativeSettings = new NativeWindowSettings
