@@ -33,7 +33,11 @@ namespace MinecraftClone
         private GameState _state = GameState.Playing;
         private int _activeSlider = 0;
 
+        // "Применённые" настройки, которые используются для рендера мира.
+        // Обновляются только при выходе из паузы, чтобы изменения слайдеров
+        // не вызывали фризы и не меняли картинку за спиной меню.
         private int _appliedRenderDistance = 5;
+        private float _appliedFov = 75f;
 
         private readonly Frustum _frustum = new();
         private readonly List<Chunk> _visibleChunks = new();
@@ -63,6 +67,7 @@ namespace MinecraftClone
 
             _settings = GameSettings.Load();
             _appliedRenderDistance = _settings.RenderDistance;
+            _appliedFov = _settings.Fov;
             VSync = _settings.VSync ? VSyncMode.On : VSyncMode.Off;
 
             GL.ClearColor(0.5f, 0.7f, 1.0f, 1.0f);
@@ -79,7 +84,7 @@ namespace MinecraftClone
             _world = new World.World();
 
             _camera = new Player.Camera(Vector3.Zero);
-            _camera.Fov = _settings.Fov;
+            _camera.Fov = _appliedFov;
             _controller = new Player.PlayerController(_camera, _world, new Vector3(0.5f, 0f, 0.5f));
 
             CursorState = CursorState.Grabbed;
@@ -148,7 +153,11 @@ namespace MinecraftClone
             _state = GameState.Playing;
             CursorState = CursorState.Grabbed;
             _firstMove = true;
+
+            // Применяем новые настройки только в момент возврата в игру
             _appliedRenderDistance = _settings.RenderDistance;
+            _appliedFov = _settings.Fov;
+            _camera.Fov = _appliedFov;
         }
 
         private void HandleMenuInput()
@@ -189,7 +198,7 @@ namespace MinecraftClone
                 {
                     float pct = Math.Clamp((mouseX - (cx - 150)) / 300f, 0f, 1f);
                     _settings.Fov = MathHelper.Lerp(50f, 110f, pct);
-                    _camera.Fov = _settings.Fov;
+                    // _camera.Fov НЕ обновляем здесь, только в ResumeGame()
                 }
 
                 if (clicked && IsHovered(cx - 150, cy + 60, 300, 20, mouseX, mouseY)) _activeSlider = 3;
@@ -199,7 +208,6 @@ namespace MinecraftClone
                     _settings.MouseSensitivity = MathHelper.Lerp(0.05f, 0.5f, pct);
                 }
 
-                // Хитбокс VSync теперь строго 30x30 (только квадратик)
                 if (clicked && IsHovered(cx - 150, cy + 110, 30, 30, mouseX, mouseY))
                 {
                     _settings.VSync = !_settings.VSync;
@@ -207,6 +215,14 @@ namespace MinecraftClone
                 }
 
                 if (clicked && IsHovered(cx - 100, cy + 160, 200, 40, mouseX, mouseY))
+                {
+                    _settings.Reset();
+                    VSync = _settings.VSync ? VSyncMode.On : VSyncMode.Off;
+                    // _camera.Fov применяется при выходе из паузы
+                    _settings.Save();
+                }
+
+                if (clicked && IsHovered(cx - 100, cy + 210, 200, 40, mouseX, mouseY))
                 {
                     _state = GameState.Paused;
                     _settings.Save();
@@ -272,16 +288,10 @@ namespace MinecraftClone
 
             GL.Disable(EnableCap.CullFace);
             GL.DepthMask(true);
-            foreach (var chunk in _visibleChunks)
-            {
-                chunk.LeafMesh?.Draw();
-            }
+            foreach (var chunk in _visibleChunks) chunk.LeafMesh?.Draw();
 
             GL.DepthMask(false);
-            foreach (var chunk in _visibleChunks)
-            {
-                chunk.WaterMesh?.Draw();
-            }
+            foreach (var chunk in _visibleChunks) chunk.WaterMesh?.Draw();
             GL.DepthMask(true);
             GL.Enable(EnableCap.CullFace);
 
@@ -398,11 +408,10 @@ namespace MinecraftClone
             float sensPct = (_settings.MouseSensitivity - 0.05f) / 0.45f;
             _ui.DrawSlider(cx - 150, cy + 60, 300, 10, sensPct, 0, 1, IsHovered(cx - 150, cy + 60, 300, 20, mx, my));
 
-            // Передаем 30x30 вместо 150x30, чтобы подсветка при наведении
-            // срабатывала только на квадратике, а не на тексте.
             _ui.DrawCheckbox(cx - 150, cy + 110, 30, "VSYNC", _settings.VSync, IsHovered(cx - 150, cy + 110, 30, 30, mx, my));
 
-            _ui.DrawButton(cx - 100, cy + 160, 200, 40, "BACK", IsHovered(cx - 100, cy + 160, 200, 40, mx, my));
+            _ui.DrawButton(cx - 100, cy + 160, 200, 40, "RESET", IsHovered(cx - 100, cy + 160, 200, 40, mx, my));
+            _ui.DrawButton(cx - 100, cy + 210, 200, 40, "BACK", IsHovered(cx - 100, cy + 210, 200, 40, mx, my));
         }
 
         protected override void OnResize(ResizeEventArgs e)

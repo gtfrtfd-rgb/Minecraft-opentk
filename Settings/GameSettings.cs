@@ -11,7 +11,12 @@ public class GameSettings
     public float Fov { get; set; } = 75f;
     public float MouseSensitivity { get; set; } = 0.15f;
 
-    private const string FilePath = "settings.json";
+    // Путь к папке Roaming (C:\Users\<User>\AppData\Roaming\MinecraftClone)
+    private static readonly string FolderPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "MinecraftClone");
+
+    private static readonly string FilePath = Path.Combine(FolderPath, "settings.json");
 
     public static GameSettings Load()
     {
@@ -28,10 +33,21 @@ public class GameSettings
         }
     }
 
+    public void Reset()
+    {
+        RenderDistance = 5;
+        VSync = true;
+        Fov = 75f;
+        MouseSensitivity = 0.15f;
+    }
+
     public void Save()
     {
         try
         {
+            // Создаем директорию, если её нет
+            Directory.CreateDirectory(FolderPath);
+
             string json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(FilePath, json);
         }

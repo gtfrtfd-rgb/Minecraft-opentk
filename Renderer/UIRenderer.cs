@@ -28,7 +28,6 @@ public class UIRenderer : IDisposable
     private readonly uint[] _indices = new uint[MaxIndices];
     private int _quadCount = 0;
 
-    // Пиксельный шрифт 5x5
     private static readonly Dictionary<char, int[]> Font = new()
     {
         {'A', new[]{0b01110, 0b10001, 0b11111, 0b10001, 0b10001}},
@@ -208,18 +207,32 @@ void main() {
     {
         Vector4 bgColor = isHovered ? new Vector4(0.3f, 0.3f, 0.3f, 0.9f) : new Vector4(0.2f, 0.2f, 0.2f, 0.8f);
         DrawSolidQuad(x, y, w, h, bgColor);
-        
-        float textWidth = text.Length * 6 * 4f;
-        DrawText(text, x + (w - textWidth) / 2f, y + (h - 20f) / 2f, 4f, Vector4.One);
+
+        // Базовый масштаб 4f. Если текст длинный — уменьшаем его, чтобы он влез в кнопку.
+        float scale = 4f;
+        float textWidth = text.Length * 6 * scale;
+        float maxWidth = w - 10f; // 5 пикселей отступа с каждой стороны
+
+        if (textWidth > maxWidth)
+        {
+            scale = maxWidth / (text.Length * 6f);
+            textWidth = text.Length * 6 * scale;
+        }
+
+        float textHeight = 5 * scale;
+        float textX = x + (w - textWidth) / 2f;
+        float textY = y + (h - textHeight) / 2f;
+
+        DrawText(text, textX, textY, scale, Vector4.One);
     }
 
     public void DrawSlider(float x, float y, float w, float h, float value, float min, float max, bool isHovered)
     {
         DrawSolidQuad(x, y, w, h, new Vector4(0.2f, 0.2f, 0.2f, 0.8f));
-        
+
         float pct = (value - min) / (max - min);
         DrawSolidQuad(x, y, w * pct, h, new Vector4(0.4f, 0.6f, 0.4f, 1f));
-        
+
         float handleWidth = 8f;
         float handleX = x + w * pct - handleWidth / 2f;
         Vector4 handleColor = isHovered ? new Vector4(1f, 1f, 1f, 1f) : new Vector4(0.8f, 0.8f, 0.8f, 1f);
@@ -230,12 +243,12 @@ void main() {
     {
         Vector4 bgColor = isHovered ? new Vector4(0.3f, 0.3f, 0.3f, 0.9f) : new Vector4(0.2f, 0.2f, 0.2f, 0.8f);
         DrawSolidQuad(x, y, size, size, bgColor);
-        
+
         if (isChecked)
         {
             DrawSolidQuad(x + 4, y + 4, size - 8, size - 8, new Vector4(0.4f, 0.8f, 0.4f, 1f));
         }
-        
+
         DrawText(text, x + size + 10, y + (size - 20f) / 2f, 4f, Vector4.One);
     }
 
@@ -292,8 +305,6 @@ void main() {
         GL.BindVertexArray(_vao);
 
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
-        // Для UI используем прямой BufferData с данными (без orphan). 
-        // На драйверах AMD это работает надежнее и без визуальных артефактов.
         GL.BufferData(BufferTarget.ArrayBuffer, _quadCount * 4 * VertexStrideFloats * sizeof(float), _vertices, BufferUsageHint.StreamDraw);
 
         GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
