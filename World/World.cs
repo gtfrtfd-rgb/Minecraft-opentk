@@ -29,8 +29,6 @@ public class World : IDisposable
     private volatile bool _isRunning = true;
     private bool _disposed;
 
-    // Rate limiting: если upload занял > 4 мс (типично для iGPU Vega 8),
-    // следующие 3 кадра мы вообще ничего не грузим.
     private static readonly long HeavyUploadThresholdTicks = Stopwatch.Frequency / 250;
     private const int CooldownAfterHeavyUpload = 3;
     private int _uploadCooldownFrames = 0;
@@ -40,12 +38,12 @@ public class World : IDisposable
     private readonly ChunkDistanceComparer _distanceComparer = new();
 
     private Vector2i _lastUnloadCheckChunk = new Vector2i(int.MinValue, int.MinValue);
+    private int _lastRenderDistance = -1;
 
     public World()
     {
         _noise = new SimplexNoise(1337);
 
-        // 2 воркера на 4-ядерном CPU — золотая середина (главный + 2 фона = 3 из 4 потоков).
         int threadCount = Math.Min(2, Math.Max(1, Environment.ProcessorCount - 2));
         for (int i = 0; i < threadCount; i++)
         {
@@ -134,7 +132,7 @@ public class World : IDisposable
             (int)MathF.Floor(playerPos.X / Chunk.SizeX),
             (int)MathF.Floor(playerPos.Z / Chunk.SizeZ));
 
-        bool needScan = currentChunk != _lastUnloadCheckChunk || !_chunksToGenerate.IsEmpty;
+        bool needScan = currentChunk != _lastUnloadCheckChunk || !_chunksToGenerate.IsEmpty || renderDistance != _lastRenderDistance;
 
         if (needScan)
         {
@@ -163,7 +161,6 @@ public class World : IDisposable
             }
         }
 
-        // === Upload с адаптивным rate limit ===
         if (_uploadCooldownFrames > 0)
         {
             _uploadCooldownFrames--;
@@ -181,7 +178,6 @@ public class World : IDisposable
                 _uploadCooldownFrames = CooldownAfterHeavyUpload;
         }
 
-        // === Отложенное удаление ===
         _framesSinceLastDelete++;
         if (_framesSinceLastDelete >= DeleteDelayFrames)
         {
@@ -194,10 +190,11 @@ public class World : IDisposable
             }
         }
 
-        // === Unload ===
-        if (currentChunk != _lastUnloadCheckChunk)
+        bool needUnload = currentChunk != _lastUnloadCheckChunk || renderDistance != _lastRenderDistance;
+        if (needUnload)
         {
             _lastUnloadCheckChunk = currentChunk;
+            _lastRenderDistance = renderDistance;
             int unloadDistance = renderDistance + 2;
             _chunksToRemoveScratch.Clear();
             foreach (var kvp in _chunks)
@@ -366,18 +363,25 @@ public class World : IDisposable
         }
     }
 
-    public void GetVisibleChunks(Vector3 cameraPos, Frustum frustum, List<Chunk> result)
+    public void GetVisibleChunks(Vector3 cameraPos, Frustum frustum, List<Chunk> result, int renderDistance)
     {
         result.Clear();
-        const float maxDistSq = 150f * 150f;
+        
+        int camChunkX = (int)MathF.Floor(cameraPos.X / Chunk.SizeX);
+        int camChunkZ = (int)MathF.Floor(cameraPos.Z / Chunk.SizeZ);
+
         foreach (var kvp in _chunks)
         {
             var chunk = kvp.Value;
-            var center = new Vector3(
-                chunk.Position.X * Chunk.SizeX + Chunk.SizeX / 2f,
-                0,
-                chunk.Position.Y * Chunk.SizeZ + Chunk.SizeZ / 2f);
-            if ((center - cameraPos).LengthSquared > maxDistSq) continue;
+            
+            // Пропускаем чанки, которые еще не загружены в VRAM
+            if (!chunk.IsUploaded) continue;
+
+            // Квадратное расстояние (как в оригинальном Minecraft).
+            // Это гарантирует, что листва, ствол и земля появляются одновременно.
+            if (Math.Abs(chunk.Position.X - camChunkX) > renderDistance ||
+                Math.Abs(chunk.Position.Y - camChunkZ) > renderDistance)
+                continue;
 
             var min = new Vector3(chunk.Position.X * Chunk.SizeX, 0, chunk.Position.Y * Chunk.SizeZ);
             var max = new Vector3(min.X + Chunk.SizeX, Chunk.SizeY, min.Z + Chunk.SizeZ);

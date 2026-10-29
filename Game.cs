@@ -33,12 +33,15 @@ namespace MinecraftClone
         private GameState _state = GameState.Playing;
         private int _activeSlider = 0;
 
+        private int _appliedRenderDistance = 5;
+
         private readonly Frustum _frustum = new();
         private readonly List<Chunk> _visibleChunks = new();
 
         private Vector3 _lastCameraPos;
         private float _lastCameraYaw;
         private float _lastCameraPitch;
+        private int _lastDrawnRenderDistance = -1;
         private bool _visibleCacheValid = false;
 
         private Vector2 _lastMousePos;
@@ -59,6 +62,7 @@ namespace MinecraftClone
             MakeCurrent();
 
             _settings = GameSettings.Load();
+            _appliedRenderDistance = _settings.RenderDistance;
             VSync = _settings.VSync ? VSyncMode.On : VSyncMode.Off;
 
             GL.ClearColor(0.5f, 0.7f, 1.0f, 1.0f);
@@ -106,9 +110,7 @@ namespace MinecraftClone
                 }
                 else if (_state == GameState.Paused)
                 {
-                    _state = GameState.Playing;
-                    CursorState = CursorState.Grabbed;
-                    _firstMove = true;
+                    ResumeGame();
                 }
                 else if (_state == GameState.Settings)
                 {
@@ -130,7 +132,7 @@ namespace MinecraftClone
 
                 float dt = Math.Min((float)args.Time, 0.05f);
                 _controller.Update(dt, KeyboardState, MouseState);
-                _world.UpdateChunks(_controller.Position, _settings.RenderDistance);
+                _world.UpdateChunks(_controller.Position, _appliedRenderDistance);
 
                 if (MouseState.IsButtonPressed(MouseButton.Left)) _controller.BreakBlock();
                 if (MouseState.IsButtonPressed(MouseButton.Right)) _controller.PlaceBlock();
@@ -139,6 +141,14 @@ namespace MinecraftClone
             {
                 HandleMenuInput();
             }
+        }
+
+        private void ResumeGame()
+        {
+            _state = GameState.Playing;
+            CursorState = CursorState.Grabbed;
+            _firstMove = true;
+            _appliedRenderDistance = _settings.RenderDistance;
         }
 
         private void HandleMenuInput()
@@ -157,16 +167,8 @@ namespace MinecraftClone
 
             if (_state == GameState.Paused)
             {
-                if (clicked && IsHovered(cx - 100, cy - 20, 200, 40, mouseX, mouseY))
-                {
-                    _state = GameState.Playing;
-                    CursorState = CursorState.Grabbed;
-                    _firstMove = true;
-                }
-                if (clicked && IsHovered(cx - 100, cy + 30, 200, 40, mouseX, mouseY))
-                {
-                    _state = GameState.Settings;
-                }
+                if (clicked && IsHovered(cx - 100, cy - 20, 200, 40, mouseX, mouseY)) ResumeGame();
+                if (clicked && IsHovered(cx - 100, cy + 30, 200, 40, mouseX, mouseY)) _state = GameState.Settings;
                 if (clicked && IsHovered(cx - 100, cy + 80, 200, 40, mouseX, mouseY))
                 {
                     _settings.Save();
@@ -244,18 +246,21 @@ namespace MinecraftClone
                 _camera.Position != _lastCameraPos ||
                 _camera.Yaw != _lastCameraYaw ||
                 _camera.Pitch != _lastCameraPitch ||
+                _appliedRenderDistance != _lastDrawnRenderDistance ||
                 !_visibleCacheValid;
 
             if (cameraChanged)
             {
                 _frustum.Update(view * proj);
-                _world.GetVisibleChunks(_camera.Position, _frustum, _visibleChunks);
+                _world.GetVisibleChunks(_camera.Position, _frustum, _visibleChunks, _appliedRenderDistance);
                 _lastCameraPos = _camera.Position;
                 _lastCameraYaw = _camera.Yaw;
                 _lastCameraPitch = _camera.Pitch;
+                _lastDrawnRenderDistance = _appliedRenderDistance;
                 _visibleCacheValid = true;
             }
 
+            // === Отрисовка непрозрачной геометрии ===
             GL.DepthMask(true);
             foreach (var chunk in _visibleChunks) chunk.OpaqueMesh?.Draw();
 
@@ -265,15 +270,25 @@ namespace MinecraftClone
                 _shader.Use();
             }
 
+            // === Отрисовка листвы и воды ===
+            // Дополнительный отсев убран. Теперь листва и стволы рисуются вместе,
+            // так как GetVisibleChunks уже отсекает чанки за пределами RenderDistance.
             GL.Disable(EnableCap.CullFace);
             GL.DepthMask(true);
-            foreach (var chunk in _visibleChunks) chunk.LeafMesh?.Draw();
+            foreach (var chunk in _visibleChunks)
+            {
+                chunk.LeafMesh?.Draw();
+            }
 
             GL.DepthMask(false);
-            foreach (var chunk in _visibleChunks) chunk.WaterMesh?.Draw();
+            foreach (var chunk in _visibleChunks)
+            {
+                chunk.WaterMesh?.Draw();
+            }
             GL.DepthMask(true);
             GL.Enable(EnableCap.CullFace);
 
+            // === UI ===
             GL.Disable(EnableCap.DepthTest);
             _atlas.Bind(TextureUnit.Texture0);
 
