@@ -46,6 +46,7 @@ in vec2 TileCoords;
 out vec4 FragColor;
 
 uniform sampler2D textureAtlas;
+uniform bool useTransparency;
 
 void main()
 {
@@ -55,7 +56,18 @@ void main()
     vec2 finalUV = (TileCoords + localUV) / 16.0;
 
     vec4 texColor = textureLod(textureAtlas, finalUV, 0.0);
-    if (texColor.a < 0.1) discard;
+    
+    if (useTransparency) 
+    {
+        if (texColor.a < 0.1) discard;
+    } 
+    else 
+    {
+        if (texColor.a < 0.1) 
+        {
+            texColor = vec4(0.2, 0.5, 0.1, 1.0);
+        }
+    }
 
     float light = 1.0;
     if (Normal.y > 0.5) light = 1.0;

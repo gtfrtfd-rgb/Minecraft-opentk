@@ -11,6 +11,10 @@ public class GameSettings
     public float Fov { get; set; } = 75f;
     public float MouseSensitivity { get; set; } = 0.15f;
     public int FpsLimit { get; set; } = 60;
+    public bool Transparency { get; set; } = true;
+    public int ResolutionWidth { get; set; } = 1280;
+    public int ResolutionHeight { get; set; } = 720;
+    public bool IsFullscreen { get; set; } = false;
 
     private static readonly string FolderPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -40,6 +44,10 @@ public class GameSettings
         Fov = 75f;
         MouseSensitivity = 0.15f;
         FpsLimit = 60;
+        Transparency = true;
+        ResolutionWidth = 1280;
+        ResolutionHeight = 720;
+        IsFullscreen = false;
     }
 
     public void Save()
