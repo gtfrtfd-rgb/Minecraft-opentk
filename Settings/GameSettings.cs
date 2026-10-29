@@ -10,8 +10,8 @@ public class GameSettings
     public bool VSync { get; set; } = true;
     public float Fov { get; set; } = 75f;
     public float MouseSensitivity { get; set; } = 0.15f;
+    public int FpsLimit { get; set; } = 60;
 
-    // Путь к папке Roaming (C:\Users\<User>\AppData\Roaming\MinecraftClone)
     private static readonly string FolderPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "MinecraftClone");
@@ -39,15 +39,14 @@ public class GameSettings
         VSync = true;
         Fov = 75f;
         MouseSensitivity = 0.15f;
+        FpsLimit = 60;
     }
 
     public void Save()
     {
         try
         {
-            // Создаем директорию, если её нет
             Directory.CreateDirectory(FolderPath);
-
             string json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(FilePath, json);
         }

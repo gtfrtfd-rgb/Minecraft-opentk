@@ -40,6 +40,8 @@ public class World : IDisposable
     private Vector2i _lastUnloadCheckChunk = new Vector2i(int.MinValue, int.MinValue);
     private int _lastRenderDistance = -1;
 
+    public bool NeedsVisibilityUpdate { get; set; } = true;
+
     public World()
     {
         _noise = new SimplexNoise(1337);
@@ -176,6 +178,12 @@ public class World : IDisposable
 
             if (elapsed > HeavyUploadThresholdTicks)
                 _uploadCooldownFrames = CooldownAfterHeavyUpload;
+
+            // ВАЖНО: Убрано MarkChunkDirty для соседей. Если помечать их здесь,
+            // возникает бесконечный цикл перестройки (А загружается -> Б перестраивается ->
+            // Б загружается -> А перестраивается -> ...). Воркеры забиваются,
+            // и новые чанки не генерируются. 
+            NeedsVisibilityUpdate = true;
         }
 
         _framesSinceLastDelete++;
@@ -213,6 +221,13 @@ public class World : IDisposable
                     var meshes = chunk.ReleaseMeshes();
                     foreach (var m in meshes)
                         if (m != null) _meshesToDelete.Enqueue(m);
+
+                    // При выгрузке чанка его соседи должны убрать стены.
+                    MarkChunkDirty(pos + new Vector2i(1, 0));
+                    MarkChunkDirty(pos + new Vector2i(-1, 0));
+                    MarkChunkDirty(pos + new Vector2i(0, 1));
+                    MarkChunkDirty(pos + new Vector2i(0, -1));
+                    NeedsVisibilityUpdate = true;
                 }
                 _dirtySet.TryRemove(pos, out _);
             }
@@ -232,6 +247,7 @@ public class World : IDisposable
                 {
                     chunk.RebuildMeshData(this);
                     _chunksToUpload.Enqueue(chunk);
+                    NeedsVisibilityUpdate = true;
                 }
                 continue;
             }
@@ -374,11 +390,8 @@ public class World : IDisposable
         {
             var chunk = kvp.Value;
             
-            // Пропускаем чанки, которые еще не загружены в VRAM
             if (!chunk.IsUploaded) continue;
 
-            // Квадратное расстояние (как в оригинальном Minecraft).
-            // Это гарантирует, что листва, ствол и земля появляются одновременно.
             if (Math.Abs(chunk.Position.X - camChunkX) > renderDistance ||
                 Math.Abs(chunk.Position.Y - camChunkZ) > renderDistance)
                 continue;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
@@ -33,11 +34,14 @@ namespace MinecraftClone
         private GameState _state = GameState.Playing;
         private int _activeSlider = 0;
 
-        // "Применённые" настройки, которые используются для рендера мира.
-        // Обновляются только при выходе из паузы, чтобы изменения слайдеров
-        // не вызывали фризы и не меняли картинку за спиной меню.
         private int _appliedRenderDistance = 5;
         private float _appliedFov = 75f;
+        private int _appliedFpsLimit = 60;
+
+        private readonly Stopwatch _fpsTimer = Stopwatch.StartNew();
+        private readonly Stopwatch _frameTimer = new Stopwatch();
+        private int _frameCount = 0;
+        private int _currentFps = 0;
 
         private readonly Frustum _frustum = new();
         private readonly List<Chunk> _visibleChunks = new();
@@ -50,10 +54,6 @@ namespace MinecraftClone
 
         private Vector2 _lastMousePos;
         private bool _firstMove = true;
-
-        private readonly Stopwatch _fpsTimer = Stopwatch.StartNew();
-        private int _frameCount = 0;
-        private int _currentFps = 0;
 
         private string _fpsText = "FPS: 0";
         private int _lastDrawnFps = -1;
@@ -68,6 +68,7 @@ namespace MinecraftClone
             _settings = GameSettings.Load();
             _appliedRenderDistance = _settings.RenderDistance;
             _appliedFov = _settings.Fov;
+            _appliedFpsLimit = _settings.FpsLimit;
             VSync = _settings.VSync ? VSyncMode.On : VSyncMode.Off;
 
             GL.ClearColor(0.5f, 0.7f, 1.0f, 1.0f);
@@ -126,6 +127,15 @@ namespace MinecraftClone
 
             if (_state == GameState.Playing)
             {
+                // ВОЗВРАЩЕНО: Переключение блоков по клавишам 1-7
+                if (KeyboardState.IsKeyPressed(Keys.D1)) _controller.SelectedBlock = BlockType.Grass;
+                if (KeyboardState.IsKeyPressed(Keys.D2)) _controller.SelectedBlock = BlockType.Dirt;
+                if (KeyboardState.IsKeyPressed(Keys.D3)) _controller.SelectedBlock = BlockType.Stone;
+                if (KeyboardState.IsKeyPressed(Keys.D4)) _controller.SelectedBlock = BlockType.Wood;
+                if (KeyboardState.IsKeyPressed(Keys.D5)) _controller.SelectedBlock = BlockType.Leaves;
+                if (KeyboardState.IsKeyPressed(Keys.D6)) _controller.SelectedBlock = BlockType.Sand;
+                if (KeyboardState.IsKeyPressed(Keys.D7)) _controller.SelectedBlock = BlockType.Water;
+
                 var mouse = new Vector2(MousePosition.X, MousePosition.Y);
                 if (_firstMove) { _lastMousePos = mouse; _firstMove = false; }
                 var delta = mouse - _lastMousePos;
@@ -154,10 +164,13 @@ namespace MinecraftClone
             CursorState = CursorState.Grabbed;
             _firstMove = true;
 
-            // Применяем новые настройки только в момент возврата в игру
             _appliedRenderDistance = _settings.RenderDistance;
             _appliedFov = _settings.Fov;
+            _appliedFpsLimit = _settings.FpsLimit;
             _camera.Fov = _appliedFov;
+
+            _frameTimer.Restart();
+            _world.NeedsVisibilityUpdate = true;
         }
 
         private void HandleMenuInput()
@@ -186,43 +199,52 @@ namespace MinecraftClone
             }
             else if (_state == GameState.Settings)
             {
-                if (clicked && IsHovered(cx - 150, cy - 60, 300, 20, mouseX, mouseY)) _activeSlider = 1;
+                if (clicked && IsHovered(cx - 150, cy - 70, 300, 20, mouseX, mouseY)) _activeSlider = 1;
                 if (_activeSlider == 1)
                 {
                     float pct = Math.Clamp((mouseX - (cx - 150)) / 300f, 0f, 1f);
                     _settings.RenderDistance = (int)MathF.Round(MathHelper.Lerp(2, 10, pct));
                 }
 
-                if (clicked && IsHovered(cx - 150, cy, 300, 20, mouseX, mouseY)) _activeSlider = 2;
+                if (clicked && IsHovered(cx - 150, cy - 20, 300, 20, mouseX, mouseY)) _activeSlider = 2;
                 if (_activeSlider == 2)
                 {
                     float pct = Math.Clamp((mouseX - (cx - 150)) / 300f, 0f, 1f);
                     _settings.Fov = MathHelper.Lerp(50f, 110f, pct);
-                    // _camera.Fov НЕ обновляем здесь, только в ResumeGame()
                 }
 
-                if (clicked && IsHovered(cx - 150, cy + 60, 300, 20, mouseX, mouseY)) _activeSlider = 3;
+                if (clicked && IsHovered(cx - 150, cy + 30, 300, 20, mouseX, mouseY)) _activeSlider = 3;
                 if (_activeSlider == 3)
                 {
                     float pct = Math.Clamp((mouseX - (cx - 150)) / 300f, 0f, 1f);
                     _settings.MouseSensitivity = MathHelper.Lerp(0.05f, 0.5f, pct);
                 }
 
-                if (clicked && IsHovered(cx - 150, cy + 110, 30, 30, mouseX, mouseY))
+                if (clicked && IsHovered(cx - 150, cy + 70, 30, 30, mouseX, mouseY))
                 {
                     _settings.VSync = !_settings.VSync;
                     VSync = _settings.VSync ? VSyncMode.On : VSyncMode.Off;
                 }
 
-                if (clicked && IsHovered(cx - 100, cy + 160, 200, 40, mouseX, mouseY))
+                if (!_settings.VSync)
+                {
+                    if (clicked && IsHovered(cx - 150, cy + 140, 300, 20, mouseX, mouseY)) _activeSlider = 4;
+                    if (_activeSlider == 4)
+                    {
+                        float pct = Math.Clamp((mouseX - (cx - 150)) / 300f, 0f, 1f);
+                        if (pct < 0.05f) _settings.FpsLimit = 0;
+                        else _settings.FpsLimit = (int)MathF.Round(MathHelper.Lerp(30, 500, pct));
+                    }
+                }
+
+                if (clicked && IsHovered(cx - 100, cy + 190, 200, 40, mouseX, mouseY))
                 {
                     _settings.Reset();
                     VSync = _settings.VSync ? VSyncMode.On : VSyncMode.Off;
-                    // _camera.Fov применяется при выходе из паузы
                     _settings.Save();
                 }
 
-                if (clicked && IsHovered(cx - 100, cy + 210, 200, 40, mouseX, mouseY))
+                if (clicked && IsHovered(cx - 100, cy + 240, 200, 40, mouseX, mouseY))
                 {
                     _state = GameState.Paused;
                     _settings.Save();
@@ -239,6 +261,8 @@ namespace MinecraftClone
         protected override void OnRenderFrame(FrameEventArgs args)
         {
             base.OnRenderFrame(args);
+
+            _frameTimer.Restart();
 
             _frameCount++;
             if (_fpsTimer.ElapsedMilliseconds >= 1000)
@@ -264,7 +288,8 @@ namespace MinecraftClone
                 _camera.Yaw != _lastCameraYaw ||
                 _camera.Pitch != _lastCameraPitch ||
                 _appliedRenderDistance != _lastDrawnRenderDistance ||
-                !_visibleCacheValid;
+                !_visibleCacheValid ||
+                _world.NeedsVisibilityUpdate;
 
             if (cameraChanged)
             {
@@ -275,6 +300,7 @@ namespace MinecraftClone
                 _lastCameraPitch = _camera.Pitch;
                 _lastDrawnRenderDistance = _appliedRenderDistance;
                 _visibleCacheValid = true;
+                _world.NeedsVisibilityUpdate = false;
             }
 
             GL.DepthMask(true);
@@ -322,6 +348,18 @@ namespace MinecraftClone
             _ui.End();
             GL.Enable(EnableCap.DepthTest);
             SwapBuffers();
+
+            if (!VSync.Equals(VSyncMode.On) && _appliedFpsLimit > 0)
+            {
+                double targetMs = 1000.0 / _appliedFpsLimit;
+                double elapsedMs = _frameTimer.Elapsed.TotalMilliseconds;
+                double sleepMs = targetMs - elapsedMs;
+
+                if (sleepMs > 1.0)
+                {
+                    Thread.Sleep((int)sleepMs);
+                }
+            }
         }
 
         private void DrawHUD(float cx, float cy, float screenH)
@@ -391,27 +429,34 @@ namespace MinecraftClone
         private void DrawSettingsMenu(float cx, float cy)
         {
             _ui.DrawSolidQuad(0, 0, ClientSize.X, ClientSize.Y, new Vector4(0, 0, 0, 0.7f));
-            _ui.DrawText("SETTINGS", cx - 80, cy - 120, 5f, Vector4.One);
+            _ui.DrawText("SETTINGS", cx - 80, cy - 130, 5f, Vector4.One);
 
             float mx = MousePosition.X;
             float my = MousePosition.Y;
 
-            _ui.DrawText($"RENDER DISTANCE: {_settings.RenderDistance}", cx - 150, cy - 80, 3f, Vector4.One);
+            _ui.DrawText($"RENDER DISTANCE: {_settings.RenderDistance}", cx - 150, cy - 90, 3f, Vector4.One);
             float distPct = (_settings.RenderDistance - 2) / 8f;
-            _ui.DrawSlider(cx - 150, cy - 60, 300, 10, distPct, 0, 1, IsHovered(cx - 150, cy - 60, 300, 20, mx, my));
+            _ui.DrawSlider(cx - 150, cy - 70, 300, 10, distPct, 0, 1, IsHovered(cx - 150, cy - 70, 300, 20, mx, my));
 
-            _ui.DrawText($"FOV: {(int)_settings.Fov}", cx - 150, cy - 20, 3f, Vector4.One);
+            _ui.DrawText($"FOV: {(int)_settings.Fov}", cx - 150, cy - 40, 3f, Vector4.One);
             float fovPct = (_settings.Fov - 50f) / 60f;
-            _ui.DrawSlider(cx - 150, cy, 300, 10, fovPct, 0, 1, IsHovered(cx - 150, cy, 300, 20, mx, my));
+            _ui.DrawSlider(cx - 150, cy - 20, 300, 10, fovPct, 0, 1, IsHovered(cx - 150, cy - 20, 300, 20, mx, my));
 
-            _ui.DrawText($"SENSITIVITY: {_settings.MouseSensitivity:F2}", cx - 150, cy + 40, 3f, Vector4.One);
+            _ui.DrawText($"SENSITIVITY: {_settings.MouseSensitivity:F2}", cx - 150, cy + 10, 3f, Vector4.One);
             float sensPct = (_settings.MouseSensitivity - 0.05f) / 0.45f;
-            _ui.DrawSlider(cx - 150, cy + 60, 300, 10, sensPct, 0, 1, IsHovered(cx - 150, cy + 60, 300, 20, mx, my));
+            _ui.DrawSlider(cx - 150, cy + 30, 300, 10, sensPct, 0, 1, IsHovered(cx - 150, cy + 30, 300, 20, mx, my));
 
-            _ui.DrawCheckbox(cx - 150, cy + 110, 30, "VSYNC", _settings.VSync, IsHovered(cx - 150, cy + 110, 30, 30, mx, my));
+            _ui.DrawCheckbox(cx - 150, cy + 70, 30, "VSYNC", _settings.VSync, IsHovered(cx - 150, cy + 70, 30, 30, mx, my));
 
-            _ui.DrawButton(cx - 100, cy + 160, 200, 40, "RESET", IsHovered(cx - 100, cy + 160, 200, 40, mx, my));
-            _ui.DrawButton(cx - 100, cy + 210, 200, 40, "BACK", IsHovered(cx - 100, cy + 210, 200, 40, mx, my));
+            string fpsText = _settings.FpsLimit == 0 ? "UNLIMITED" : _settings.FpsLimit.ToString();
+            Vector4 fpsColor = _settings.VSync ? new Vector4(0.5f, 0.5f, 0.5f, 1f) : Vector4.One;
+            _ui.DrawText($"FPS LIMIT: {fpsText}", cx - 150, cy + 120, 3f, fpsColor);
+            
+            float fpsPct = _settings.FpsLimit == 0 ? 0f : MathHelper.Clamp((_settings.FpsLimit - 30) / 470f, 0f, 1f);
+            _ui.DrawSlider(cx - 150, cy + 140, 300, 10, fpsPct, 0, 1, !_settings.VSync && IsHovered(cx - 150, cy + 140, 300, 20, mx, my));
+
+            _ui.DrawButton(cx - 100, cy + 190, 200, 40, "RESET", IsHovered(cx - 100, cy + 190, 200, 40, mx, my));
+            _ui.DrawButton(cx - 100, cy + 240, 200, 40, "BACK", IsHovered(cx - 100, cy + 240, 200, 40, mx, my));
         }
 
         protected override void OnResize(ResizeEventArgs e)
