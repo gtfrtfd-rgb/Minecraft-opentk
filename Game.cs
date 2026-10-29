@@ -203,7 +203,8 @@ namespace MinecraftClone
                 if (_activeSlider == 1)
                 {
                     float pct = Math.Clamp((mouseX - (cx - 150)) / 300f, 0f, 1f);
-                    _settings.RenderDistance = (int)MathF.Round(MathHelper.Lerp(2, 10, pct));
+                    // Максимальная дальность теперь 20
+                    _settings.RenderDistance = (int)MathF.Round(MathHelper.Lerp(2, 20, pct));
                 }
 
                 if (clicked && IsHovered(cx - 150, cy - 20, 300, 20, mouseX, mouseY)) _activeSlider = 2;
@@ -435,7 +436,8 @@ namespace MinecraftClone
             float my = MousePosition.Y;
 
             _ui.DrawText($"RENDER DISTANCE: {_settings.RenderDistance}", cx - 150, cy - 90, 3f, Vector4.One);
-            float distPct = (_settings.RenderDistance - 2) / 8f;
+            // Формула обновлена под диапазон 2-20 (разница 18)
+            float distPct = (_settings.RenderDistance - 2) / 18f;
             _ui.DrawSlider(cx - 150, cy - 70, 300, 10, distPct, 0, 1, IsHovered(cx - 150, cy - 70, 300, 20, mx, my));
 
             _ui.DrawText($"FOV: {(int)_settings.Fov}", cx - 150, cy - 40, 3f, Vector4.One);
