@@ -11,7 +11,6 @@ public static class Collision
         onGround = false;
         Vector3 newPos = pos;
 
-        // Если мы внутри блока, ищем безопасную позицию
         if (CheckCollision(world, pos, size))
         {
             for (float i = 1f; i <= 256f; i += 1f)
@@ -60,7 +59,7 @@ public static class Collision
         return newPos;
     }
 
-    private static bool CheckCollision(World.World world, Vector3 pos, Vector3 size)
+    public static bool CheckCollision(World.World world, Vector3 pos, Vector3 size)
     {
         float halfWidth = size.X / 2f;
         

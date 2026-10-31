@@ -9,21 +9,37 @@ public class PlayerController
 {
     private readonly Camera _camera;
     private readonly World.World _world;
-
+    
     public Vector3 Position { get; private set; }
     public Vector3 Velocity;
     public bool IsGrounded;
-
+    
     public BlockType SelectedBlock { get; set; } = BlockType.Stone;
 
     private const float PlayerWidth = 0.6f;
-    private const float PlayerHeight = 1.8f;
-    private const float EyeHeight = 1.62f;
+    
+    // Размеры и высоты глаз
+    private const float StandingHeight = 1.8f;
+    private const float CrouchingHeight = 1.4f;
+    private const float StandingEyeHeight = 1.62f;
+    private const float CrouchingEyeHeight = 1.22f;
 
-    private const float Gravity = -24f;
+    // Текущие плавно изменяющиеся параметры
+    private float _currentHeight = StandingHeight;
+    private float _currentEyeHeight = StandingEyeHeight;
+
+    // Скорости
+    private const float WalkSpeed = 5.5f;
+    private const float SprintSpeed = 7.0f; // Уменьшено с 8.5f
+    private const float CrouchSpeed = 2.75f;
+    private const float MoveSpeed = WalkSpeed;
+
+    private const float Gravity = -24f; 
     private const float JumpForce = 8.5f;
-    private const float MoveSpeed = 5.5f;
     private const float Reach = 5f;
+
+    public bool IsCrouching { get; private set; } = false;
+    public bool IsSprinting { get; private set; } = false;
 
     private bool _needsSpawn = true;
 
@@ -32,7 +48,7 @@ public class PlayerController
         _camera = camera;
         _world = world;
         Position = startPosition;
-        _camera.Position = Position + new Vector3(0, EyeHeight, 0);
+        _camera.Position = Position + new Vector3(0, _currentEyeHeight, 0);
     }
 
     public void Update(float dt, KeyboardState keyboard, MouseState mouse)
@@ -41,7 +57,7 @@ public class PlayerController
         {
             if (!TrySpawn())
             {
-                _camera.Position = Position + new Vector3(0, EyeHeight, 0);
+                _camera.Position = Position + new Vector3(0, _currentEyeHeight, 0);
                 return;
             }
             _needsSpawn = false;
@@ -49,7 +65,6 @@ public class PlayerController
 
         if (Position.Y < -10 || Position.Y > 300)
         {
-            // Упали за пределы мира — переспавнимся.
             _needsSpawn = true;
             Velocity = Vector3.Zero;
             return;
@@ -59,36 +74,69 @@ public class PlayerController
         {
             Velocity = Vector3.Zero;
             IsGrounded = true;
-            _camera.Position = Position + new Vector3(0, EyeHeight, 0);
+            _camera.Position = Position + new Vector3(0, _currentEyeHeight, 0);
             return;
         }
 
         Vector3 front = _camera.GetFrontVector();
         front.Y = 0;
         if (front.LengthSquared > 0) front.Normalize();
-
+        
         Vector3 right = Vector3.Cross(front, Vector3.UnitY).Normalized();
 
         Vector3 moveDir = Vector3.Zero;
         if (keyboard.IsKeyDown(Keys.W) || keyboard.IsKeyDown(Keys.Up))    moveDir += front;
-        if (keyboard.IsKeyDown(Keys.S) || keyboard.IsKeyDown(Keys.Down))  moveDir -= front;
-        if (keyboard.IsKeyDown(Keys.A) || keyboard.IsKeyDown(Keys.Left))  moveDir -= right;
-        if (keyboard.IsKeyDown(Keys.D) || keyboard.IsKeyDown(Keys.Right)) moveDir += right;
-
+        if (keyboard.IsKeyDown(Keys.S))    moveDir -= front;
+        if (keyboard.IsKeyDown(Keys.A))  moveDir -= right;
+        if (keyboard.IsKeyDown(Keys.D)) moveDir += right;
+        
         if (moveDir.LengthSquared > 0) moveDir.Normalize();
 
-        Velocity.X = moveDir.X * MoveSpeed;
-        Velocity.Z = moveDir.Z * MoveSpeed;
+        // === ЛОГИКА ПРИСЕДАНИЯ ===
+        bool wantsToCrouch = keyboard.IsKeyDown(Keys.LeftShift);
+        if (!wantsToCrouch && IsCrouching)
+        {
+            // Проверяем, можем ли мы встать (нет ли блока над головой)
+            Vector3 standSize = new Vector3(PlayerWidth, StandingHeight, PlayerWidth);
+            if (!Physics.Collision.CheckCollision(_world, Position, standSize))
+            {
+                IsCrouching = false;
+            }
+        }
+        else if (wantsToCrouch)
+        {
+            IsCrouching = true;
+        }
 
-        if (keyboard.IsKeyDown(Keys.Space) && IsGrounded)
+        // === ЛОГИКА БЕГА ===
+        bool wantsToSprint = keyboard.IsKeyDown(Keys.LeftControl) && !IsCrouching;
+        // Бежать можно только если двигаемся вперед
+        if (wantsToSprint && moveDir.LengthSquared > 0)
+        {
+            IsSprinting = true;
+        }
+        else
+        {
+            IsSprinting = false;
+        }
+
+        // Определяем текущую скорость
+        float currentSpeed = WalkSpeed;
+        if (IsCrouching) currentSpeed = CrouchSpeed;
+        else if (IsSprinting) currentSpeed = SprintSpeed;
+
+        Velocity.X = moveDir.X * currentSpeed;
+        Velocity.Z = moveDir.Z * currentSpeed;
+
+        if (keyboard.IsKeyDown(Keys.Space) && IsGrounded && !IsCrouching)
         {
             Velocity.Y = JumpForce;
             IsGrounded = false;
         }
 
         float remainingTime = dt;
-        IsGrounded = false;
-
+        IsGrounded = false; 
+        
         while (remainingTime > 0f)
         {
             float step = Math.Min(remainingTime, 0.016f);
@@ -97,17 +145,26 @@ public class PlayerController
             Velocity.Y += Gravity * step;
             Velocity.Y = Math.Max(Velocity.Y, -40f);
 
-            Vector3 playerSize = new Vector3(PlayerWidth, PlayerHeight, PlayerWidth);
+            // Используем текущую высоту (плавно меняется)
+            Vector3 playerSize = new Vector3(PlayerWidth, _currentHeight, PlayerWidth);
             Position = Physics.Collision.Move(_world, Position, playerSize, ref Velocity, step, out bool onGround);
-
+            
             if (onGround)
             {
                 IsGrounded = true;
-                Velocity.Y = 0;
+                Velocity.Y = 0; 
             }
         }
 
-        _camera.Position = Position + new Vector3(0, EyeHeight, 0);
+        // === ПЛАВНОЕ ИЗМЕНЕНИЕ ВЫСОТЫ КАМЕРЫ ===
+        float targetHeight = IsCrouching ? CrouchingHeight : StandingHeight;
+        float targetEyeHeight = IsCrouching ? CrouchingEyeHeight : StandingEyeHeight;
+
+        float lerpFactor = Math.Min(1f, dt * 15f); // Плавный переход за ~0.1 сек
+        _currentHeight = MathHelper.Lerp(_currentHeight, targetHeight, lerpFactor);
+        _currentEyeHeight = MathHelper.Lerp(_currentEyeHeight, targetEyeHeight, lerpFactor);
+
+        _camera.Position = Position + new Vector3(0, _currentEyeHeight, 0);
     }
 
     private bool TrySpawn()
@@ -117,23 +174,20 @@ public class PlayerController
         int x = (int)MathF.Floor(Position.X);
         int z = (int)MathF.Floor(Position.Z);
 
-        // Ищем верхнюю твёрдую поверхность сверху вниз. Так игрок гарантированно
-        // стоит на земле, а не падает с неба.
         for (int y = Chunk.SizeY - 1; y >= 0; y--)
         {
             if (BlockData.IsSolid(_world.GetBlock(x, y, z)))
             {
                 Position = new Vector3(Position.X, y + 1, Position.Z);
                 Velocity = Vector3.Zero;
-                _camera.Position = Position + new Vector3(0, EyeHeight, 0);
+                _camera.Position = Position + new Vector3(0, _currentEyeHeight, 0);
                 return true;
             }
         }
 
-        // Странно, но если ничего не нашли — просто ставим на разумную высоту.
         Position = new Vector3(Position.X, 100, Position.Z);
         Velocity = Vector3.Zero;
-        _camera.Position = Position + new Vector3(0, EyeHeight, 0);
+        _camera.Position = Position + new Vector3(0, _currentEyeHeight, 0);
         return true;
     }
 
@@ -154,7 +208,7 @@ public class PlayerController
                 Vector3 blockMax = new Vector3(placePos.X + 1, placePos.Y + 1, placePos.Z + 1);
 
                 Vector3 playerMin = new Vector3(Position.X - PlayerWidth / 2f, Position.Y, Position.Z - PlayerWidth / 2f);
-                Vector3 playerMax = new Vector3(Position.X + PlayerWidth / 2f, Position.Y + PlayerHeight, Position.Z + PlayerWidth / 2f);
+                Vector3 playerMax = new Vector3(Position.X + PlayerWidth / 2f, Position.Y + _currentHeight, Position.Z + PlayerWidth / 2f);
 
                 bool intersects = (playerMin.X < blockMax.X && playerMax.X > blockMin.X) &&
                                   (playerMin.Y < blockMax.Y && playerMax.Y > blockMin.Y) &&
