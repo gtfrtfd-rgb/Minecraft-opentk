@@ -27,12 +27,14 @@ uniform mat4 projection;
 out vec2 TexCoord;
 out vec3 Normal;
 out vec2 TileCoords;
+out vec3 WorldPos;
 
 void main()
 {
     TexCoord = aTexCoord;
     Normal = aNormal;
     TileCoords = aTileCoords;
+    WorldPos = aPosition;
     gl_Position = projection * view * vec4(aPosition, 1.0);
 }
 ";
@@ -43,10 +45,15 @@ void main()
 in vec2 TexCoord;
 in vec3 Normal;
 in vec2 TileCoords;
+in vec3 WorldPos;
 out vec4 FragColor;
 
 uniform sampler2D textureAtlas;
 uniform bool useTransparency;
+uniform vec3 cameraPos;
+uniform vec3 fogColor;
+uniform float fogStart;
+uniform float fogEnd;
 
 void main()
 {
@@ -77,7 +84,14 @@ void main()
     else if (Normal.x > 0.5) light = 0.6;
     else if (Normal.x < -0.5) light = 0.6;
 
-    FragColor = vec4(texColor.rgb * light, texColor.a);
+    vec3 baseColor = texColor.rgb * light;
+
+    float dist = length(WorldPos - cameraPos);
+    float fogFactor = clamp((fogEnd - dist) / (fogEnd - fogStart), 0.0, 1.0);
+    
+    vec3 finalColor = mix(fogColor, baseColor, fogFactor);
+
+    FragColor = vec4(finalColor, texColor.a);
 }
 ";
 
@@ -124,6 +138,18 @@ void main()
     {
         int loc = GetUniformLocation(name);
         GL.Uniform1(loc, value);
+    }
+
+    public void SetFloat(string name, float value)
+    {
+        int loc = GetUniformLocation(name);
+        GL.Uniform1(loc, value);
+    }
+
+    public void SetVector3(string name, Vector3 value)
+    {
+        int loc = GetUniformLocation(name);
+        GL.Uniform3(loc, value);
     }
 
     private int GetUniformLocation(string name)

@@ -39,7 +39,6 @@ namespace MinecraftClone
             (800, 600), (1024, 768), (1280, 720), (1366, 768), (1600, 900), (1920, 1080)
         };
 
-        // "Применённые" настройки, которые используются для рендера мира
         private int _appliedRenderDistance = 5;
         private float _appliedFov = 75f;
         private int _appliedFpsLimit = 60;
@@ -64,6 +63,9 @@ namespace MinecraftClone
 
         private string _fpsText = "FPS: 0";
         private int _lastDrawnFps = -1;
+
+        // Цвет тумана (должен совпадать с ClearColor)
+        private static readonly Vector3 FogColor = new Vector3(0.5f, 0.7f, 1.0f);
 
         public Game(GameWindowSettings gws, NativeWindowSettings nws) : base(gws, nws) { }
 
@@ -91,7 +93,7 @@ namespace MinecraftClone
             _appliedTransparency = _settings.Transparency;
             VSync = _settings.VSync ? VSyncMode.On : VSyncMode.Off;
 
-            GL.ClearColor(0.5f, 0.7f, 1.0f, 1.0f);
+            GL.ClearColor(FogColor.X, FogColor.Y, FogColor.Z, 1.0f);
             GL.Enable(EnableCap.DepthTest);
             GL.Enable(EnableCap.CullFace);
             GL.CullFace(CullFaceMode.Back);
@@ -183,7 +185,6 @@ namespace MinecraftClone
             CursorState = CursorState.Grabbed;
             _firstMove = true;
 
-            // Применяем новые настройки только в момент возврата в игру
             _appliedRenderDistance = _settings.RenderDistance;
             _appliedFov = _settings.Fov;
             _appliedFpsLimit = _settings.FpsLimit;
@@ -343,7 +344,6 @@ namespace MinecraftClone
 
             GL.Viewport(0, 0, ClientSize.X, ClientSize.Y);
 
-            // Используем _appliedTransparency, чтобы не менять картинку в меню
             if (_appliedTransparency)
             {
                 GL.Enable(EnableCap.Blend);
@@ -364,6 +364,16 @@ namespace MinecraftClone
             _shader.SetMatrix4("projection", proj);
             _shader.SetInt("textureAtlas", 0);
             _shader.SetInt("useTransparency", _appliedTransparency ? 1 : 0);
+
+            // Настройки тумана
+            _shader.SetVector3("cameraPos", _camera.Position);
+            _shader.SetVector3("fogColor", FogColor);
+            
+            // Туман начинается на 50% дистанции и заканчивается чуть раньше края чанков
+            float maxViewDist = _appliedRenderDistance * Chunk.SizeX;
+            _shader.SetFloat("fogStart", maxViewDist * 0.5f);
+            _shader.SetFloat("fogEnd", maxViewDist * 0.95f);
+
             _atlas.Bind(TextureUnit.Texture0);
 
             bool cameraChanged =
@@ -395,7 +405,6 @@ namespace MinecraftClone
                 _shader.Use();
             }
 
-            // Используем _appliedTransparency
             if (_appliedTransparency)
             {
                 GL.Disable(EnableCap.CullFace);
