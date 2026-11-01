@@ -45,12 +45,14 @@ namespace MinecraftClone
         private bool _appliedTransparency = true;
 
         private readonly Stopwatch _fpsTimer = Stopwatch.StartNew();
+        private readonly Stopwatch _gameTimer = Stopwatch.StartNew(); // Для плавной анимации воды
         private readonly Stopwatch _frameTimer = new Stopwatch();
         private int _frameCount = 0;
         private int _currentFps = 0;
 
         private readonly Frustum _frustum = new();
         private readonly List<Chunk> _visibleChunks = new();
+        private readonly List<Chunk> _waterSortScratch = new();
 
         private Vector3 _lastCameraPos;
         private float _lastCameraYaw;
@@ -65,6 +67,26 @@ namespace MinecraftClone
         private int _lastDrawnFps = -1;
 
         private static readonly Vector3 FogColor = new Vector3(0.5f, 0.7f, 1.0f);
+
+        private sealed class ChunkDistanceToCameraComparer : IComparer<Chunk>
+        {
+            public Vector3 CameraPos;
+
+            public int Compare(Chunk? a, Chunk? b)
+            {
+                if (a == null) return 1;
+                if (b == null) return -1;
+
+                Vector3 aCenter = new Vector3(a.Position.X * Chunk.SizeX + Chunk.SizeX * 0.5f, 64f, a.Position.Y * Chunk.SizeZ + Chunk.SizeZ * 0.5f);
+                Vector3 bCenter = new Vector3(b.Position.X * Chunk.SizeX + Chunk.SizeX * 0.5f, 64f, b.Position.Y * Chunk.SizeZ + Chunk.SizeZ * 0.5f);
+
+                float dA = (aCenter - CameraPos).LengthSquared;
+                float dB = (bCenter - CameraPos).LengthSquared;
+                return dB.CompareTo(dA);
+            }
+        }
+
+        private readonly ChunkDistanceToCameraComparer _waterComparer = new();
 
         public Game(GameWindowSettings gws, NativeWindowSettings nws) : base(gws, nws) { }
 
@@ -365,6 +387,7 @@ namespace MinecraftClone
             _shader.SetInt("useTransparency", _appliedTransparency ? 1 : 0);
             _shader.SetVector3("cameraPos", _camera.Position);
             _shader.SetVector3("fogColor", FogColor);
+            _shader.SetFloat("time", (float)_gameTimer.Elapsed.TotalSeconds);
             
             float maxViewDist = _appliedRenderDistance * Chunk.SizeX;
             _shader.SetFloat("fogStart", maxViewDist * 0.5f);
@@ -407,8 +430,17 @@ namespace MinecraftClone
                 GL.DepthMask(true);
                 foreach (var chunk in _visibleChunks) chunk.LeafMesh?.Draw();
 
+                _waterComparer.CameraPos = _camera.Position;
+                _waterSortScratch.Clear();
+                foreach (var chunk in _visibleChunks)
+                {
+                    if (chunk.WaterMesh != null)
+                        _waterSortScratch.Add(chunk);
+                }
+                _waterSortScratch.Sort(_waterComparer);
+
                 GL.DepthMask(false);
-                foreach (var chunk in _visibleChunks) chunk.WaterMesh?.Draw();
+                foreach (var chunk in _waterSortScratch) chunk.WaterMesh?.Draw();
                 GL.DepthMask(true);
                 GL.Enable(EnableCap.CullFace);
             }
@@ -478,7 +510,6 @@ namespace MinecraftClone
             _ui.DrawText(_fpsText, 20, 20, 4f, new Vector4(0, 0, 0, 0.8f));
             _ui.DrawText(_fpsText, 19, 19, 4f, Vector4.One);
 
-            // Координаты игрока (вычитаем 1.62f, чтобы показывать позицию ног, а не глаз)
             var pos = _controller.Position;
             float feetY = pos.Y - 1.62f;
             string coordsText = $"X: {(int)MathF.Floor(pos.X)} Y: {(int)MathF.Floor(feetY)} Z: {(int)MathF.Floor(pos.Z)}";

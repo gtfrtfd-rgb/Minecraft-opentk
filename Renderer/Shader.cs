@@ -35,6 +35,7 @@ void main()
     Normal = aNormal;
     TileCoords = aTileCoords;
     WorldPos = aPosition;
+
     gl_Position = projection * view * vec4(aPosition, 1.0);
 }
 ";
@@ -54,41 +55,52 @@ uniform vec3 cameraPos;
 uniform vec3 fogColor;
 uniform float fogStart;
 uniform float fogEnd;
+uniform float time;
 
 void main()
 {
     vec2 localUV = fract(TexCoord);
     localUV = clamp(localUV, 0.001, 0.999);
-    
-    vec2 finalUV = (TileCoords + localUV) / 16.0;
 
+    float isWater = 0.0;
+    if (abs(TileCoords.x - 8.0) < 0.5 && TileCoords.y > 14.5) {
+        isWater = 1.0;
+    }
+
+    if (isWater > 0.5)
+    {
+        localUV.x += sin(time * 1.5) * 0.05;
+        localUV.y += cos(time * 1.2) * 0.05;
+        localUV = fract(localUV);
+    }
+
+    vec2 finalUV = (TileCoords + localUV) / 16.0;
     vec4 texColor = textureLod(textureAtlas, finalUV, 0.0);
-    
-    if (useTransparency) 
+
+    if (useTransparency)
     {
         if (texColor.a < 0.1) discard;
-    } 
-    else 
+    }
+    else
     {
-        if (texColor.a < 0.1) 
+        if (texColor.a < 0.1)
         {
             texColor = vec4(0.2, 0.5, 0.1, 1.0);
         }
     }
 
     float light = 1.0;
-    if (Normal.y > 0.5) light = 1.0;
-    else if (Normal.y < -0.5) light = 0.5;
-    else if (Normal.z > 0.5) light = 0.8;
-    else if (Normal.z < -0.5) light = 0.7;
-    else if (Normal.x > 0.5) light = 0.6;
-    else if (Normal.x < -0.5) light = 0.6;
+    if (Normal.y > 0.5) { light = 1.0; }
+    else if (Normal.y < -0.5) { light = 0.5; }
+    else if (Normal.z > 0.5) { light = 0.8; }
+    else if (Normal.z < -0.5) { light = 0.7; }
+    else if (Normal.x > 0.5) { light = 0.6; }
+    else if (Normal.x < -0.5) { light = 0.6; }
 
     vec3 baseColor = texColor.rgb * light;
 
     float dist = length(WorldPos - cameraPos);
     float fogFactor = clamp((fogEnd - dist) / (fogEnd - fogStart), 0.0, 1.0);
-    
     vec3 finalColor = mix(fogColor, baseColor, fogFactor);
 
     FragColor = vec4(finalColor, texColor.a);

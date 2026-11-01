@@ -32,8 +32,8 @@ public class TextureAtlas : IDisposable
 
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
     }
 
     private static void SetPixel(byte[] pixels, int atlasWidth, int tileX, int tileY, int px, int py, byte r, byte g, byte b, byte a = 255)
@@ -156,8 +156,15 @@ public class TextureAtlas : IDisposable
         for (int x = 0; x < 16; x++)
         for (int y = 0; y < 16; y++)
         {
-            byte v = (byte)rnd.Next(50, 100);
-            SetPixel(p, w, tx, ty, x, y, 40, 100, (byte)(150 + v), 160);
+            // Мягкая вода: чуть светлее и с меньшим контрастом
+            byte r = 50, g = 100, b = 200;
+            int noise = rnd.Next(-10, 10);
+            r = (byte)Math.Clamp(r + noise / 3, 0, 255);
+            g = (byte)Math.Clamp(g + noise / 2, 0, 255);
+            b = (byte)Math.Clamp(b + noise, 0, 255);
+            
+            // Делаем её чуть более прозрачной (160 вместо 180)
+            SetPixel(p, w, tx, ty, x, y, r, g, b, 160);
         }
     }
 
