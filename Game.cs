@@ -314,7 +314,7 @@ namespace MinecraftClone
                 _shader.Use(); // Возвращаем основной шейдер после OutlineRenderer
             }
 
-            // 3. Отрисовка прозрачных блоков (листья и вода)
+                        // 3. Отрисовка прозрачных блоков (листья и вода)
             if (_appliedTransparency)
             {
                 GL.Disable(EnableCap.CullFace);
@@ -330,8 +330,10 @@ namespace MinecraftClone
                 }
                 _waterSortScratch.Sort(_waterComparer);
 
-                                // Вода рисуется без CullFace, чтобы не было видно внутренних стенок (кубов)
-                GL.Disable(EnableCap.CullFace);
+                // ВКЛЮЧАЕМ CullFace, чтобы не рисовать задние стенки водоёмов.
+                // Это убирает "просвечивание" воды сквозь землю.
+                GL.Enable(EnableCap.CullFace);
+                GL.CullFace(CullFaceMode.Back);
                 GL.DepthMask(false);
                 
                 foreach (var chunk in _waterSortScratch) chunk.WaterMesh?.Draw();

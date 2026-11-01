@@ -35,7 +35,6 @@ void main()
     Normal = aNormal;
     TileCoords = aTileCoords;
     WorldPos = aPosition;
-
     gl_Position = projection * view * vec4(aPosition, 1.0);
 }
 ";
@@ -69,8 +68,8 @@ void main()
 
     if (isWater > 0.5)
     {
-        localUV.x += sin(time * 1.5) * 0.05;
-        localUV.y += cos(time * 1.2) * 0.05;
+        localUV.x += sin(time * 1.5) * 0.01;
+        localUV.y += cos(time * 1.2) * 0.01;
         localUV = fract(localUV);
     }
 
