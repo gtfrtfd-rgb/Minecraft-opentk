@@ -15,6 +15,7 @@ public class Chunk
 
     public Vector2i Position { get; }
     private readonly BlockType[,,] _blocks = new BlockType[SizeX, SizeY, SizeZ];
+    private readonly sbyte[,,] _waterLevels = new sbyte[SizeX, SizeY, SizeZ];
 
     public Renderer.ChunkMesh? OpaqueMesh { get; private set; }
     public Renderer.ChunkMesh? LeafMesh { get; private set; }
@@ -51,7 +52,14 @@ public class Chunk
         public int WaterIndsLen;
     }
 
-    public Chunk(Vector2i position) => Position = position;
+    public Chunk(Vector2i position) 
+    {
+        Position = position;
+        for (int x = 0; x < SizeX; x++)
+        for (int y = 0; y < SizeY; y++)
+        for (int z = 0; z < SizeZ; z++)
+            _waterLevels[x, y, z] = -1;
+    }
 
     public void SetDirty() => Interlocked.Exchange(ref _isDirty, 1);
     public bool TryClearDirty() => Interlocked.Exchange(ref _isDirty, 0) == 1;
@@ -64,45 +72,67 @@ public class Chunk
 
     public BlockType GetBlockNoCheck(int x, int y, int z) => _blocks[x, y, z];
 
-    public void SetBlock(int x, int y, int z, BlockType type)
+    public sbyte GetWaterLevel(int x, int y, int z)
+    {
+        if (x < 0 || x >= SizeX || y < 0 || y >= SizeY || z < 0 || z >= SizeZ) return -1;
+        return _waterLevels[x, y, z];
+    }
+
+        private readonly object _meshLock = new object();
+
+    public void SetBlock(int x, int y, int z, BlockType type, int waterLevel = 0)
     {
         if (x < 0 || x >= SizeX || y < 0 || y >= SizeY || z < 0 || z >= SizeZ) return;
-        _blocks[x, y, z] = type;
+        
+        lock (_meshLock)
+        {
+            _blocks[x, y, z] = type;
+            _waterLevels[x, y, z] = (type == BlockType.Water) ? (sbyte)waterLevel : (sbyte)-1;
+        }
+        
         Interlocked.Exchange(ref _isDirty, 1);
     }
 
-    public void SetBlockDirect(int x, int y, int z, BlockType type)
+    public void SetBlockDirect(int x, int y, int z, BlockType type, int waterLevel = 0)
     {
         if (x < 0 || x >= SizeX || y < 0 || y >= SizeY || z < 0 || z >= SizeZ) return;
-        _blocks[x, y, z] = type;
+        
+        lock (_meshLock)
+        {
+            _blocks[x, y, z] = type;
+            _waterLevels[x, y, z] = (type == BlockType.Water) ? (sbyte)waterLevel : (sbyte)-1;
+        }
     }
 
     public void RebuildMeshData(World world)
     {
-        var left  = world.GetChunk(Position.X - 1, Position.Y);
-        var right = world.GetChunk(Position.X + 1, Position.Y);
-        var front = world.GetChunk(Position.X,     Position.Y - 1);
-        var back  = world.GetChunk(Position.X,     Position.Y + 1);
-
-        _opaqueVerts.Clear(); _opaqueInds.Clear();
-        _leafVerts.Clear();   _leafInds.Clear();
-        _waterVerts.Clear();  _waterInds.Clear();
-
-        GreedyMesh(left, right, front, back, _opaqueVerts, _opaqueInds, 0);
-        GreedyMesh(left, right, front, back, _leafVerts, _leafInds, 1);
-        GreedyMesh(left, right, front, back, _waterVerts, _waterInds, 2);
-
-        var data = new ChunkMeshData
+        lock (_meshLock)
         {
-            OpaqueVerts = CopyToPool(_opaqueVerts), OpaqueVertsLen = _opaqueVerts.Count,
-            OpaqueInds = CopyToPool(_opaqueInds),   OpaqueIndsLen = _opaqueInds.Count,
-            LeafVerts = CopyToPool(_leafVerts),     LeafVertsLen = _leafVerts.Count,
-            LeafInds = CopyToPool(_leafInds),       LeafIndsLen = _leafInds.Count,
-            WaterVerts = CopyToPool(_waterVerts),   WaterVertsLen = _waterVerts.Count,
-            WaterInds = CopyToPool(_waterInds),     WaterIndsLen = _waterInds.Count,
-        };
+            var left  = world.GetChunk(Position.X - 1, Position.Y);
+            var right = world.GetChunk(Position.X + 1, Position.Y);
+            var front = world.GetChunk(Position.X,     Position.Y - 1);
+            var back  = world.GetChunk(Position.X,     Position.Y + 1);
 
-        Volatile.Write(ref _pendingMeshData, data);
+            _opaqueVerts.Clear(); _opaqueInds.Clear();
+            _leafVerts.Clear();   _leafInds.Clear();
+            _waterVerts.Clear();  _waterInds.Clear();
+
+            GreedyMesh(left, right, front, back, _opaqueVerts, _opaqueInds, 0);
+            GreedyMesh(left, right, front, back, _leafVerts, _leafInds, 1);
+            GreedyMesh(left, right, front, back, _waterVerts, _waterInds, 2);
+
+            var data = new ChunkMeshData
+            {
+                OpaqueVerts = CopyToPool(_opaqueVerts), OpaqueVertsLen = _opaqueVerts.Count,
+                OpaqueInds = CopyToPool(_opaqueInds),   OpaqueIndsLen = _opaqueInds.Count,
+                LeafVerts = CopyToPool(_leafVerts),     LeafVertsLen = _leafVerts.Count,
+                LeafInds = CopyToPool(_leafInds),       LeafIndsLen = _leafInds.Count,
+                WaterVerts = CopyToPool(_waterVerts),   WaterVertsLen = _waterVerts.Count,
+                WaterInds = CopyToPool(_waterInds),     WaterIndsLen = _waterInds.Count,
+            };
+
+            Volatile.Write(ref _pendingMeshData, data);
+        }
     }
 
     private static float[] CopyToPool(List<float> src)
@@ -121,24 +151,18 @@ public class Chunk
         return arr;
     }
 
-    private bool Hides(BlockType target, BlockType neighbor)
+    private bool Hides(BlockType target, int tLevel, BlockType neighbor, int nLevel)
     {
         if (neighbor == BlockType.Air) return false;
 
-        // Вода скрывает свои грани только если сосед — тоже вода, ИЛИ твердый блок.
-        // Если сосед — листья, вода с ними не сливается.
-        if (target == BlockType.Water)
-        {
-            if (neighbor == BlockType.Water) return true;
-            if (BlockData.IsOpaque(neighbor)) return true;
-            return false;
-        }
+        // Вода скрывает любые грани с водой (никаких стенок внутри потока)
+        if (target == BlockType.Water && neighbor == BlockType.Water) return true;
+        
+        // Вода скрывает грани с непрозрачными блоками (камнем, землёй)
+        if (target == BlockType.Water && BlockData.IsOpaque(neighbor)) return true;
 
-        // Остальные блоки скрывают грани с любым соседом, кроме воздуха,
-        // воды (если сами не вода) и листьев.
         if (neighbor == BlockType.Water) return target == BlockType.Water;
         if (neighbor == BlockType.Leaves) return target == BlockType.Leaves;
-        
         return true;
     }
 
@@ -151,6 +175,17 @@ public class Chunk
         if (z < 0)  return front != null ? front.GetBlockNoCheck(x, y, SizeZ - 1) : BlockType.Air;
         if (z >= SizeZ) return back != null ? back.GetBlockNoCheck(x, y, 0) : BlockType.Air;
         return BlockType.Air;
+    }
+
+    private sbyte GetWaterLevelWithNeighbors(int x, int y, int z, Chunk? left, Chunk? right, Chunk? front, Chunk? back)
+    {
+        if ((uint)y >= (uint)SizeY) return -1;
+        if ((uint)x < (uint)SizeX && (uint)z < (uint)SizeZ) return _waterLevels[x, y, z];
+        if (x < 0)  return left  != null ? left.GetWaterLevel(SizeX - 1, y, z) : (sbyte)-1;
+        if (x >= SizeX) return right != null ? right.GetWaterLevel(0, y, z) : (sbyte)-1;
+        if (z < 0)  return front != null ? front.GetWaterLevel(x, y, SizeZ - 1) : (sbyte)-1;
+        if (z >= SizeZ) return back != null ? back.GetWaterLevel(x, y, 0) : (sbyte)-1;
+        return -1;
     }
 
     private void GreedyMesh(Chunk? left, Chunk? right, Chunk? front, Chunk? back, List<float> verts, List<uint> inds, int pass)
@@ -186,12 +221,15 @@ public class Chunk
                         BlockType a = GetBlockWithNeighbors(x[0], x[1], x[2], left, right, front, back);
                         BlockType b = GetBlockWithNeighbors(x[0] + q[0], x[1] + q[1], x[2] + q[2], left, right, front, back);
 
+                        sbyte aLevel = GetWaterLevelWithNeighbors(x[0], x[1], x[2], left, right, front, back);
+                        sbyte bLevel = GetWaterLevelWithNeighbors(x[0] + q[0], x[1] + q[1], x[2] + q[2], left, right, front, back);
+
                         bool aMatch = pass == 0 ? BlockData.IsOpaque(a) : pass == 1 ? a == BlockType.Leaves : a == BlockType.Water;
                         bool bMatch = pass == 0 ? BlockData.IsOpaque(b) : pass == 1 ? b == BlockType.Leaves : b == BlockType.Water;
 
-                        if (a != BlockType.Air && aMatch && !Hides(a, b))
+                        if (a != BlockType.Air && aMatch && !Hides(a, aLevel, b, bLevel))
                             axisMask[n++] = (int)a * 2 + 1;
-                        else if (b != BlockType.Air && bMatch && !Hides(b, a))
+                        else if (b != BlockType.Air && bMatch && !Hides(b, bLevel, a, aLevel))
                             axisMask[n++] = (int)b * 2 + 2;
                         else
                             axisMask[n++] = 0;

@@ -32,8 +32,8 @@ public class TextureAtlas : IDisposable
 
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
     }
 
     private static void SetPixel(byte[] pixels, int atlasWidth, int tileX, int tileY, int px, int py, byte r, byte g, byte b, byte a = 255)
@@ -150,22 +150,18 @@ public class TextureAtlas : IDisposable
         }
     }
 
-        private static void GenerateWater(byte[] p, int w, int tx, int ty)
+    // НОВАЯ ГЕНЕРАЦИЯ ВОДЫ: Однородная, без шахматки, чуть плотнее.
+    private static void GenerateWater(byte[] p, int w, int tx, int ty)
     {
-        // Делаем воду однородной и полупрозрачной (альфа 120)
-        // Без резкого шума, чтобы не было "ряби" из пикселей.
-        // Вся анимация теперь происходит в шейдере через UV.
-        
         for (int x = 0; x < 16; x++)
         {
             for (int y = 0; y < 16; y++)
             {
-                // Легкий градиент, чтобы вода не была абсолютно плоской
-                int variation = (x + y) % 4;
-                byte r = (byte)(40 + variation);
-                byte g = (byte)(90 + variation);
-                byte b = (byte)(190 + variation);
-                byte a = 120; // Прозрачность
+                // Однородный синий цвет. Альфа 180 (из 255) - достаточно прозрачно, но без "стекла".
+                byte r = 40;
+                byte g = 90;
+                byte b = 190;
+                byte a = 180;
 
                 SetPixel(p, w, tx, ty, x, y, r, g, b, a);
             }

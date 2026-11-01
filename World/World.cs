@@ -12,6 +12,7 @@ public class World : IDisposable
 {
     private readonly ConcurrentDictionary<Vector2i, Chunk> _chunks = new();
     private readonly SimplexNoise _noise;
+    private readonly WaterSimulator _waterSim;
 
     private readonly ConcurrentQueue<Vector2i> _chunksToGenerate = new();
     private readonly ConcurrentQueue<Vector2i> _chunksToRebuild = new();
@@ -45,6 +46,7 @@ public class World : IDisposable
     public World()
     {
         _noise = new SimplexNoise(1337);
+        _waterSim = new WaterSimulator(this);
 
         int threadCount = Math.Min(2, Math.Max(1, Environment.ProcessorCount - 2));
         for (int i = 0; i < threadCount; i++)
@@ -79,7 +81,20 @@ public class World : IDisposable
         return chunk.GetBlock(localX, worldY, localZ);
     }
 
-    public void SetBlock(int worldX, int worldY, int worldZ, BlockType type)
+    public sbyte GetWaterLevel(int worldX, int worldY, int worldZ)
+    {
+        var chunkPos = new Vector2i(
+            (int)MathF.Floor(worldX / (float)Chunk.SizeX),
+            (int)MathF.Floor(worldZ / (float)Chunk.SizeZ));
+
+        if (!_chunks.TryGetValue(chunkPos, out var chunk)) return -1;
+
+        int localX = worldX - chunkPos.X * Chunk.SizeX;
+        int localZ = worldZ - chunkPos.Y * Chunk.SizeZ;
+        return chunk.GetWaterLevel(localX, worldY, localZ);
+    }
+
+    public void SetBlock(int worldX, int worldY, int worldZ, BlockType type, int waterLevel = 0)
     {
         var chunkPos = new Vector2i(
             (int)MathF.Floor(worldX / (float)Chunk.SizeX),
@@ -89,14 +104,37 @@ public class World : IDisposable
 
         int localX = worldX - chunkPos.X * Chunk.SizeX;
         int localZ = worldZ - chunkPos.Y * Chunk.SizeZ;
-        chunk.SetBlock(localX, worldY, localZ, type);
+        
+        chunk.SetBlock(localX, worldY, localZ, type, waterLevel);
         MarkChunkDirty(chunkPos);
 
         if (localX == 0) MarkChunkDirty(chunkPos + new Vector2i(-1, 0));
         if (localX == Chunk.SizeX - 1) MarkChunkDirty(chunkPos + new Vector2i(1, 0));
         if (localZ == 0) MarkChunkDirty(chunkPos + new Vector2i(0, -1));
         if (localZ == Chunk.SizeZ - 1) MarkChunkDirty(chunkPos + new Vector2i(0, 1));
+
+        _waterSim.AddDirtyBlock(worldX, worldY, worldZ);
     }
+
+    // Используется симулятором воды для прямой записи без рекурсии
+    public void SetBlockDirectForSim(int worldX, int worldY, int worldZ, BlockType type, int waterLevel = 0)
+    {
+        var chunkPos = new Vector2i(
+            (int)MathF.Floor(worldX / (float)Chunk.SizeX),
+            (int)MathF.Floor(worldZ / (float)Chunk.SizeZ));
+
+        if (!_chunks.TryGetValue(chunkPos, out var chunk)) return;
+
+        int localX = worldX - chunkPos.X * Chunk.SizeX;
+        int localZ = worldZ - chunkPos.Y * Chunk.SizeZ;
+        
+        chunk.SetBlockDirect(localX, worldY, localZ, type, waterLevel);
+        
+        // Мгновенно помечаем чанк для перестройки
+        MarkChunkDirty(chunkPos); 
+    }
+
+    public void MarkChunkDirtyDirectly(Vector2i pos) => MarkChunkDirty(pos);
 
     public bool IsChunkReady(float worldX, float worldZ)
     {
@@ -407,6 +445,7 @@ public class World : IDisposable
         _disposed = true;
 
         _isRunning = false;
+        _waterSim.Dispose();
 
         foreach (var thread in _workers)
         {

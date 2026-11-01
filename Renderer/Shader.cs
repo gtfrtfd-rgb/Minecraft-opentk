@@ -68,8 +68,8 @@ void main()
 
     if (isWater > 0.5)
     {
-        localUV.x += sin(time * 1.5) * 0.01;
-        localUV.y += cos(time * 1.2) * 0.01;
+        localUV.x += sin(time * 1.2) * 0.005;
+        localUV.y += cos(time * 1.0) * 0.005;
         localUV = fract(localUV);
     }
 
@@ -97,6 +97,11 @@ void main()
     else if (Normal.x < -0.5) { light = 0.6; }
 
     vec3 baseColor = texColor.rgb * light;
+
+    if (isWater > 0.5) 
+    {
+        baseColor = mix(baseColor, vec3(0.1, 0.3, 0.7), 0.3);
+    }
 
     float dist = length(WorldPos - cameraPos);
     float fogFactor = clamp((fogEnd - dist) / (fogEnd - fogStart), 0.0, 1.0);

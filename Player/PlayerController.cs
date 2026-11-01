@@ -147,6 +147,43 @@ public class PlayerController
                 Velocity.Y = 0; 
             }
         }
+        // 
+
+bool isInWater = false;
+int feetY = (int)MathF.Floor(Position.Y);
+int headY = (int)MathF.Floor(Position.Y + _currentEyeHeight);
+int px = (int)MathF.Floor(Position.X);
+int pz = (int)MathF.Floor(Position.Z);
+
+for (int y = feetY; y <= headY; y++)
+{
+    if (_world.GetBlock(px, y, pz) == BlockType.Water)
+    {
+        isInWater = true;
+        break;
+    }
+}
+
+if (isInWater)
+{
+    // Физика воды
+    Velocity.Y -= 5f * dt; // Медленное падение
+    if (Velocity.Y < -3f) Velocity.Y = -3f;
+
+    if (keyboard.IsKeyDown(Keys.Space))
+    {
+        Velocity.Y = 4f; // Плаваем вверх
+    }
+
+    // Замедляем горизонтальное движение
+    Velocity.X *= 0.8f;
+    Velocity.Z *= 0.8f;
+}
+else
+{
+    // Обычная физика (гравитация)
+    Velocity.Y += Gravity * dt;
+}
 
         float targetHeight = IsCrouching ? CrouchingHeight : StandingHeight;
         float targetEyeHeight = IsCrouching ? CrouchingEyeHeight : StandingEyeHeight;
