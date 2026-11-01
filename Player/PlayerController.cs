@@ -18,19 +18,16 @@ public class PlayerController
 
     private const float PlayerWidth = 0.6f;
     
-    // Размеры и высоты глаз
     private const float StandingHeight = 1.8f;
     private const float CrouchingHeight = 1.4f;
     private const float StandingEyeHeight = 1.62f;
     private const float CrouchingEyeHeight = 1.22f;
 
-    // Текущие плавно изменяющиеся параметры
     private float _currentHeight = StandingHeight;
     private float _currentEyeHeight = StandingEyeHeight;
 
-    // Скорости
     private const float WalkSpeed = 5.5f;
-    private const float SprintSpeed = 7.0f; // Уменьшено с 8.5f
+    private const float SprintSpeed = 7.0f;
     private const float CrouchSpeed = 2.75f;
     private const float MoveSpeed = WalkSpeed;
 
@@ -85,18 +82,18 @@ public class PlayerController
         Vector3 right = Vector3.Cross(front, Vector3.UnitY).Normalized();
 
         Vector3 moveDir = Vector3.Zero;
+        
+        // Поддержка WASD и стрелок
         if (keyboard.IsKeyDown(Keys.W) || keyboard.IsKeyDown(Keys.Up))    moveDir += front;
-        if (keyboard.IsKeyDown(Keys.S))    moveDir -= front;
-        if (keyboard.IsKeyDown(Keys.A))  moveDir -= right;
-        if (keyboard.IsKeyDown(Keys.D)) moveDir += right;
+        if (keyboard.IsKeyDown(Keys.S) || keyboard.IsKeyDown(Keys.Down))  moveDir -= front;
+        if (keyboard.IsKeyDown(Keys.A) || keyboard.IsKeyDown(Keys.Left))  moveDir -= right;
+        if (keyboard.IsKeyDown(Keys.D) || keyboard.IsKeyDown(Keys.Right)) moveDir += right;
         
         if (moveDir.LengthSquared > 0) moveDir.Normalize();
 
-        // === ЛОГИКА ПРИСЕДАНИЯ ===
         bool wantsToCrouch = keyboard.IsKeyDown(Keys.LeftShift);
         if (!wantsToCrouch && IsCrouching)
         {
-            // Проверяем, можем ли мы встать (нет ли блока над головой)
             Vector3 standSize = new Vector3(PlayerWidth, StandingHeight, PlayerWidth);
             if (!Physics.Collision.CheckCollision(_world, Position, standSize))
             {
@@ -108,9 +105,7 @@ public class PlayerController
             IsCrouching = true;
         }
 
-        // === ЛОГИКА БЕГА ===
         bool wantsToSprint = keyboard.IsKeyDown(Keys.LeftControl) && !IsCrouching;
-        // Бежать можно только если двигаемся вперед
         if (wantsToSprint && moveDir.LengthSquared > 0)
         {
             IsSprinting = true;
@@ -120,7 +115,6 @@ public class PlayerController
             IsSprinting = false;
         }
 
-        // Определяем текущую скорость
         float currentSpeed = WalkSpeed;
         if (IsCrouching) currentSpeed = CrouchSpeed;
         else if (IsSprinting) currentSpeed = SprintSpeed;
@@ -145,7 +139,6 @@ public class PlayerController
             Velocity.Y += Gravity * step;
             Velocity.Y = Math.Max(Velocity.Y, -40f);
 
-            // Используем текущую высоту (плавно меняется)
             Vector3 playerSize = new Vector3(PlayerWidth, _currentHeight, PlayerWidth);
             Position = Physics.Collision.Move(_world, Position, playerSize, ref Velocity, step, out bool onGround);
             
@@ -156,11 +149,10 @@ public class PlayerController
             }
         }
 
-        // === ПЛАВНОЕ ИЗМЕНЕНИЕ ВЫСОТЫ КАМЕРЫ ===
         float targetHeight = IsCrouching ? CrouchingHeight : StandingHeight;
         float targetEyeHeight = IsCrouching ? CrouchingEyeHeight : StandingEyeHeight;
 
-        float lerpFactor = Math.Min(1f, dt * 15f); // Плавный переход за ~0.1 сек
+        float lerpFactor = Math.Min(1f, dt * 15f);
         _currentHeight = MathHelper.Lerp(_currentHeight, targetHeight, lerpFactor);
         _currentEyeHeight = MathHelper.Lerp(_currentEyeHeight, targetEyeHeight, lerpFactor);
 

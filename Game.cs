@@ -64,7 +64,6 @@ namespace MinecraftClone
         private string _fpsText = "FPS: 0";
         private int _lastDrawnFps = -1;
 
-        // Цвет тумана (должен совпадать с ClearColor)
         private static readonly Vector3 FogColor = new Vector3(0.5f, 0.7f, 1.0f);
 
         public Game(GameWindowSettings gws, NativeWindowSettings nws) : base(gws, nws) { }
@@ -364,12 +363,9 @@ namespace MinecraftClone
             _shader.SetMatrix4("projection", proj);
             _shader.SetInt("textureAtlas", 0);
             _shader.SetInt("useTransparency", _appliedTransparency ? 1 : 0);
-
-            // Настройки тумана
             _shader.SetVector3("cameraPos", _camera.Position);
             _shader.SetVector3("fogColor", FogColor);
             
-            // Туман начинается на 50% дистанции и заканчивается чуть раньше края чанков
             float maxViewDist = _appliedRenderDistance * Chunk.SizeX;
             _shader.SetFloat("fogStart", maxViewDist * 0.5f);
             _shader.SetFloat("fogEnd", maxViewDist * 0.95f);
@@ -481,6 +477,13 @@ namespace MinecraftClone
             }
             _ui.DrawText(_fpsText, 20, 20, 4f, new Vector4(0, 0, 0, 0.8f));
             _ui.DrawText(_fpsText, 19, 19, 4f, Vector4.One);
+
+            // Координаты игрока (вычитаем 1.62f, чтобы показывать позицию ног, а не глаз)
+            var pos = _controller.Position;
+            float feetY = pos.Y - 1.62f;
+            string coordsText = $"X: {(int)MathF.Floor(pos.X)} Y: {(int)MathF.Floor(feetY)} Z: {(int)MathF.Floor(pos.Z)}";
+            _ui.DrawText(coordsText, 20, 45, 3f, new Vector4(0, 0, 0, 0.8f));
+            _ui.DrawText(coordsText, 19, 44, 3f, Vector4.One);
 
             float slotSize = 56f;
             float padding = 4f;
