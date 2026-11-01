@@ -125,19 +125,20 @@ public class Chunk
     {
         if (neighbor == BlockType.Air) return false;
 
-        // Если целевой блок — вода:
+        // Вода скрывает свои грани только если сосед — тоже вода, ИЛИ твердый блок.
+        // Если сосед — листья, вода с ними не сливается.
         if (target == BlockType.Water)
         {
-            // Скрываем грань, если сосед — тоже вода, ИЛИ любой твёрдый непрозрачный блок.
-            // Если сосед — листья, грань видна (вода сквозь листья).
             if (neighbor == BlockType.Water) return true;
             if (BlockData.IsOpaque(neighbor)) return true;
             return false;
         }
 
-        // Для остальных блоков:
+        // Остальные блоки скрывают грани с любым соседом, кроме воздуха,
+        // воды (если сами не вода) и листьев.
         if (neighbor == BlockType.Water) return target == BlockType.Water;
         if (neighbor == BlockType.Leaves) return target == BlockType.Leaves;
+        
         return true;
     }
 
