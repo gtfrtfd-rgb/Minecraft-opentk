@@ -83,7 +83,6 @@ public class PlayerController
 
         Vector3 moveDir = Vector3.Zero;
         
-        // Поддержка WASD и стрелок
         if (keyboard.IsKeyDown(Keys.W) || keyboard.IsKeyDown(Keys.Up))    moveDir += front;
         if (keyboard.IsKeyDown(Keys.S) || keyboard.IsKeyDown(Keys.Down))  moveDir -= front;
         if (keyboard.IsKeyDown(Keys.A) || keyboard.IsKeyDown(Keys.Left))  moveDir -= right;

@@ -179,10 +179,6 @@ public class World : IDisposable
             if (elapsed > HeavyUploadThresholdTicks)
                 _uploadCooldownFrames = CooldownAfterHeavyUpload;
 
-            // ВАЖНО: Убрано MarkChunkDirty для соседей. Если помечать их здесь,
-            // возникает бесконечный цикл перестройки (А загружается -> Б перестраивается ->
-            // Б загружается -> А перестраивается -> ...). Воркеры забиваются,
-            // и новые чанки не генерируются. 
             NeedsVisibilityUpdate = true;
         }
 
@@ -222,7 +218,6 @@ public class World : IDisposable
                     foreach (var m in meshes)
                         if (m != null) _meshesToDelete.Enqueue(m);
 
-                    // При выгрузке чанка его соседи должны убрать стены.
                     MarkChunkDirty(pos + new Vector2i(1, 0));
                     MarkChunkDirty(pos + new Vector2i(-1, 0));
                     MarkChunkDirty(pos + new Vector2i(0, 1));

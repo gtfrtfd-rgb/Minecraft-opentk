@@ -21,11 +21,27 @@ public class ChunkMesh : IDisposable
 
         _vbo = GL.GenBuffer();
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
-        GL.BufferData(BufferTarget.ArrayBuffer, vertexBytes, vertices, BufferUsageHint.StaticDraw);
+        
+        // Используем unsafe-указатели, чтобы загрузить РОВНО столько байт, 
+        // сколько нужно, игнорируя лишний "мусор" из ArrayPool.
+        unsafe
+        {
+            fixed (float* v = vertices)
+            {
+                GL.BufferData(BufferTarget.ArrayBuffer, vertexBytes, (IntPtr)v, BufferUsageHint.StaticDraw);
+            }
+        }
 
         _ebo = GL.GenBuffer();
         GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
-        GL.BufferData(BufferTarget.ElementArrayBuffer, indexBytes, indices, BufferUsageHint.StaticDraw);
+        
+        unsafe
+        {
+            fixed (uint* i = indices)
+            {
+                GL.BufferData(BufferTarget.ElementArrayBuffer, indexBytes, (IntPtr)i, BufferUsageHint.StaticDraw);
+            }
+        }
 
         int stride = 10 * sizeof(float);
         GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, 0);

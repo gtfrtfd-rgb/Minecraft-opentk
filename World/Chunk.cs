@@ -26,7 +26,6 @@ public class Chunk
 
     private ChunkMeshData? _pendingMeshData;
 
-    // Переиспользуемые List'ы — избегаем реаллокаций внутренних массивов между rebuild'ами.
     private readonly List<float> _opaqueVerts = new(4096);
     private readonly List<uint> _opaqueInds = new(4096);
     private readonly List<float> _leafVerts = new(1024);
@@ -93,7 +92,6 @@ public class Chunk
         GreedyMesh(left, right, front, back, _leafVerts, _leafInds, 1);
         GreedyMesh(left, right, front, back, _waterVerts, _waterInds, 2);
 
-        // Копируем результат в массивы из ArrayPool — ноль аллокаций в LOH.
         var data = new ChunkMeshData
         {
             OpaqueVerts = CopyToPool(_opaqueVerts), OpaqueVertsLen = _opaqueVerts.Count,
@@ -307,7 +305,6 @@ public class Chunk
         WaterMesh = data.WaterVertsLen > 0
             ? new Renderer.ChunkMesh(data.WaterVerts, data.WaterVertsLen, data.WaterInds, data.WaterIndsLen) : null;
 
-        // Возвращаем массивы в пул, чтобы GC не работал.
         if (data.OpaqueVerts.Length > 0) ArrayPool<float>.Shared.Return(data.OpaqueVerts);
         if (data.OpaqueInds.Length > 0)  ArrayPool<uint>.Shared.Return(data.OpaqueInds);
         if (data.LeafVerts.Length > 0)   ArrayPool<float>.Shared.Return(data.LeafVerts);
@@ -325,6 +322,23 @@ public class Chunk
         OpaqueMesh = null;
         LeafMesh = null;
         WaterMesh = null;
+
+        CleanupPendingData(); // Очищаем ArrayPool, если чанк выгрузили до аплоада
         return old;
+    }
+
+    // Возвращает массивы в пул, если чанк удалили до того, как они попали в GPU
+    public void CleanupPendingData()
+    {
+        var data = Interlocked.Exchange(ref _pendingMeshData, null);
+        if (data != null)
+        {
+            if (data.OpaqueVerts.Length > 0) ArrayPool<float>.Shared.Return(data.OpaqueVerts);
+            if (data.OpaqueInds.Length > 0)  ArrayPool<uint>.Shared.Return(data.OpaqueInds);
+            if (data.LeafVerts.Length > 0)   ArrayPool<float>.Shared.Return(data.LeafVerts);
+            if (data.LeafInds.Length > 0)    ArrayPool<uint>.Shared.Return(data.LeafInds);
+            if (data.WaterVerts.Length > 0)  ArrayPool<float>.Shared.Return(data.WaterVerts);
+            if (data.WaterInds.Length > 0)   ArrayPool<uint>.Shared.Return(data.WaterInds);
+        }
     }
 }
