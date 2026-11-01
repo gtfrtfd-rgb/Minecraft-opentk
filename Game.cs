@@ -424,7 +424,7 @@ namespace MinecraftClone
                 _shader.Use();
             }
 
-            if (_appliedTransparency)
+             if (_appliedTransparency)
             {
                 GL.Disable(EnableCap.CullFace);
                 GL.DepthMask(true);
@@ -439,10 +439,14 @@ namespace MinecraftClone
                 }
                 _waterSortScratch.Sort(_waterComparer);
 
-                GL.DepthMask(false);
-                foreach (var chunk in _waterSortScratch) chunk.WaterMesh?.Draw();
-                GL.DepthMask(true);
+                // Включаем CullFace для воды, чтобы не было "каши" из внутренних граней
                 GL.Enable(EnableCap.CullFace);
+                GL.CullFace(CullFaceMode.Back);
+                GL.DepthMask(false);
+                
+                foreach (var chunk in _waterSortScratch) chunk.WaterMesh?.Draw();
+                
+                GL.DepthMask(true);
             }
             else
             {

@@ -150,21 +150,25 @@ public class TextureAtlas : IDisposable
         }
     }
 
-    private static void GenerateWater(byte[] p, int w, int tx, int ty)
+        private static void GenerateWater(byte[] p, int w, int tx, int ty)
     {
-        var rnd = new Random(700 + tx * 31 + ty);
+        // Делаем воду однородной и полупрозрачной (альфа 120)
+        // Без резкого шума, чтобы не было "ряби" из пикселей.
+        // Вся анимация теперь происходит в шейдере через UV.
+        
         for (int x = 0; x < 16; x++)
-        for (int y = 0; y < 16; y++)
         {
-            // Мягкая вода: чуть светлее и с меньшим контрастом
-            byte r = 50, g = 100, b = 200;
-            int noise = rnd.Next(-10, 10);
-            r = (byte)Math.Clamp(r + noise / 3, 0, 255);
-            g = (byte)Math.Clamp(g + noise / 2, 0, 255);
-            b = (byte)Math.Clamp(b + noise, 0, 255);
-            
-            // Делаем её чуть более прозрачной (160 вместо 180)
-            SetPixel(p, w, tx, ty, x, y, r, g, b, 160);
+            for (int y = 0; y < 16; y++)
+            {
+                // Легкий градиент, чтобы вода не была абсолютно плоской
+                int variation = (x + y) % 4;
+                byte r = (byte)(40 + variation);
+                byte g = (byte)(90 + variation);
+                byte b = (byte)(190 + variation);
+                byte a = 120; // Прозрачность
+
+                SetPixel(p, w, tx, ty, x, y, r, g, b, a);
+            }
         }
     }
 

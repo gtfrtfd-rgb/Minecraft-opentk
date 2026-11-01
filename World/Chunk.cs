@@ -124,6 +124,18 @@ public class Chunk
     private bool Hides(BlockType target, BlockType neighbor)
     {
         if (neighbor == BlockType.Air) return false;
+
+        // Если целевой блок — вода:
+        if (target == BlockType.Water)
+        {
+            // Скрываем грань, если сосед — тоже вода, ИЛИ любой твёрдый непрозрачный блок.
+            // Если сосед — листья, грань видна (вода сквозь листья).
+            if (neighbor == BlockType.Water) return true;
+            if (BlockData.IsOpaque(neighbor)) return true;
+            return false;
+        }
+
+        // Для остальных блоков:
         if (neighbor == BlockType.Water) return target == BlockType.Water;
         if (neighbor == BlockType.Leaves) return target == BlockType.Leaves;
         return true;
@@ -323,11 +335,10 @@ public class Chunk
         LeafMesh = null;
         WaterMesh = null;
 
-        CleanupPendingData(); // Очищаем ArrayPool, если чанк выгрузили до аплоада
+        CleanupPendingData();
         return old;
     }
 
-    // Возвращает массивы в пул, если чанк удалили до того, как они попали в GPU
     public void CleanupPendingData()
     {
         var data = Interlocked.Exchange(ref _pendingMeshData, null);
